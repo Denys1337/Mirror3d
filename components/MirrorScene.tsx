@@ -15,6 +15,12 @@ export interface MirrorSceneProps {
   showClock?: boolean; // Uhr im Spiegel anzeigen
   clockCorner?: "top-left" | "top-center" | "top-right" | "right-center" | "bottom-right" | "bottom-center" | "bottom-left" | "left-center" | null; // Position der Uhr (null = Mitte)
   onClockCornerChange?: (corner: "top-left" | "top-center" | "top-right" | "right-center" | "bottom-right" | "bottom-center" | "bottom-left" | "left-center") => void; // Callback für Positionsänderung der Uhr
+  showSocket?: boolean; // Steckdose anzeigen
+  socketCorner?: "top-left" | "top-right" | "bottom-left" | "bottom-right"; // Position der Steckdose
+  showShelf?: boolean; // Glasregal anzeigen
+  shelfWidthPercent?: number; // Breite des Regals in Prozent
+  showHygieneMirror?: boolean; // Hygienespiegel anzeigen
+  hygieneMirrorCorner?: "bottom-left" | "bottom-right"; // Position des Hygienespiegels
 }
 
 // Umrechnungsfaktor mm -> Meter in der Szene
@@ -478,7 +484,13 @@ export default function MirrorScene({
   hdrRotation = Math.PI / 2, // Початкове обертання: права сторона спочатку
   showClock = false,
   clockCorner = null,
-  onClockCornerChange
+  onClockCornerChange,
+  showSocket = false,
+  socketCorner = "top-right",
+  showShelf = false,
+  shelfWidthPercent = 80,
+  showHygieneMirror = false,
+  hygieneMirrorCorner = "bottom-left"
 }: MirrorSceneProps) {
   return (
     <Canvas

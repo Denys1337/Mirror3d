@@ -1,9 +1,9 @@
 "use client";
 
-import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls, MeshReflectorMaterial, Environment, useTexture, RoundedBox, useGLTF } from "@react-three/drei";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { OrbitControls, MeshReflectorMaterial, Environment, useTexture, RoundedBox, useGLTF, Html } from "@react-three/drei";
 import { Color } from "three";
-import { useRef, useState, useMemo } from "react";
+import { useRef, useState, useMemo, useEffect } from "react";
 import * as THREE from "three";
 
 export interface MirrorSceneProps {
@@ -21,6 +21,8 @@ export interface MirrorSceneProps {
   shelfWidthPercent?: number; // Breite des Regals in Prozent
   showHygieneMirror?: boolean; // Hygienespiegel anzeigen
   hygieneMirrorCorner?: "bottom-left" | "bottom-right"; // Position des Hygienespiegels
+  cameraView?: "top" | "left" | "right" | "front"; // Kamera-Ansicht
+  showDimensions?: boolean; // Розміри зеркала показувати
 }
 
 // Umrechnungsfaktor mm -> Meter in der Szene
@@ -157,11 +159,11 @@ function ClockPositionSelector({
             document.body.style.cursor = 'auto';
           }}
         >
-          {/* Türkiser Kreis #369baa */}
+          {/* Orange Kreis rgba(245, 158, 11, 1) */}
           <mesh renderOrder={1000}>
             <circleGeometry args={[circleRadius, 32]} />
             <meshBasicMaterial 
-              color={new THREE.Color(0x369baa)} // Farbe #369baa
+              color={new THREE.Color(0xf59e0b)} // Farbe rgba(245, 158, 11, 1)
               transparent={true}
               opacity={0.8}
               depthWrite={false}
@@ -207,6 +209,202 @@ function ClockPositionSelector({
           </group>
         </group>
       ))}
+    </group>
+  );
+}
+
+function MirrorDimensions({
+  widthMm,
+  heightMm
+}: {
+  widthMm: number;
+  heightMm: number;
+}) {
+  const width = widthMm * MM_TO_M;
+  const height = heightMm * MM_TO_M;
+  const mountDepth = 0.06;
+  const frameThickness = 0.035;
+  
+  // Розмір без рамки (зеркало без рамки)
+  const mirrorWidth = width;
+  const mirrorHeight = height;
+  
+  // Розміри монтажного блоку (менші за зеркало на frameThickness з кожного боку)
+  const mountWidth = width - frameThickness * 2;
+  const mountHeight = height - frameThickness * 2;
+  
+  // Відстань від краю монтажного блоку до мітки (50см = 0.5м)
+  const labelOffsetFromMount = 0.5;
+  // Відстань від краю монтажного блоку до лінії (20см = 0.2м)
+  const lineOffsetFromMount = 0.2;
+  
+  // Позиції відносно центру сцени
+  // Вирівнюємо відносно зеркала (не монтажного блоку)
+  // Верхній край зеркала: mirrorHeight / 2
+  // Лівий край зеркала: -mirrorWidth / 2
+  const topLabelY = mirrorHeight / 2 + labelOffsetFromMount;
+  const topLineY = mirrorHeight / 2 + lineOffsetFromMount;
+  const leftLabelX = -mirrorWidth / 2 - labelOffsetFromMount;
+  const leftLineX = -mirrorWidth / 2 - lineOffsetFromMount;
+  
+  // Debug: виводимо значення для перевірки
+  console.log('MirrorDimensions:', {
+    widthMm,
+    heightMm,
+    mountWidth,
+    mountHeight,
+    topLabelY,
+    topLineY,
+    leftLabelX,
+    leftLineX,
+    labelOffsetFromMount,
+    lineOffsetFromMount
+  });
+  
+  // Створюємо текстуру для пунктирної лінії (штрих 6см, проміжок 6см)
+  const lineTexture = useMemo(() => {
+    const dashLengthM = 0.06; // 6см в метрах
+    const dashGapM = 0.06; // 6см проміжок в метрах
+    const patternLengthM = dashLengthM + dashGapM;
+    
+    // Створюємо canvas з розміром, що відповідає паттерну
+    // Використовуємо масштаб: 1 піксель = 0.001м (1мм)
+    const pixelsPerMeter = 1000; // 1000 пікселів на метр
+    const dashLengthPx = dashLengthM * pixelsPerMeter; // 60 пікселів для 6см
+    const dashGapPx = dashGapM * pixelsPerMeter; // 60 пікселів для 6см
+    const patternLengthPx = dashLengthPx + dashGapPx; // 120 пікселів
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = patternLengthPx;
+    canvas.height = 4;
+    const ctx = canvas.getContext('2d')!;
+    
+    // Очищаємо canvas (прозорий фон)
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Малюємо штрих
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, 2);
+    ctx.lineTo(dashLengthPx, 2);
+    ctx.stroke();
+    
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    // Налаштовуємо repeat так, щоб паттерн правильно повторювався
+    // mirrorWidth в метрах, patternLengthM теж в метрах
+    tex.repeat.set(mirrorWidth / patternLengthM, 1);
+    return tex;
+  }, [mirrorWidth]);
+  
+  const lineTextureVertical = useMemo(() => {
+    const dashLengthM = 0.06; // 6см в метрах
+    const dashGapM = 0.06; // 6см проміжок в метрах
+    const patternLengthM = dashLengthM + dashGapM;
+    
+    // Створюємо canvas з розміром, що відповідає паттерну
+    // Використовуємо масштаб: 1 піксель = 0.001м (1мм)
+    const pixelsPerMeter = 1000; // 1000 пікселів на метр
+    const dashLengthPx = dashLengthM * pixelsPerMeter; // 60 пікселів для 6см
+    const dashGapPx = dashGapM * pixelsPerMeter; // 60 пікселів для 6см
+    const patternLengthPx = dashLengthPx + dashGapPx; // 120 пікселів
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = 4;
+    canvas.height = patternLengthPx;
+    const ctx = canvas.getContext('2d')!;
+    
+    // Очищаємо canvas (прозорий фон)
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Малюємо штрих
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(2, 0);
+    ctx.lineTo(2, dashLengthPx);
+    ctx.stroke();
+    
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    // Налаштовуємо repeat так, щоб паттерн правильно повторювався
+    // mirrorHeight в метрах, patternLengthM теж в метрах
+    // Для вертикальної лінії, яка обертається, потрібно правильно налаштувати repeat
+    const repeatValue = mirrorHeight / patternLengthM;
+    tex.repeat.set(1, repeatValue);
+    tex.flipY = false;
+    tex.offset.set(0, 0);
+    return tex;
+  }, [mirrorHeight]);
+  
+  return (
+    <group>
+      {/* Верхня лінія - 15см від верхнього краю монтажного блоку */}
+      <mesh position={[0, topLineY, -mountDepth + 0.21]}>
+        <planeGeometry args={[mirrorWidth, 0.02]} />
+        <meshBasicMaterial map={lineTexture} opacity={1} transparent={false} />
+      </mesh>
+      
+      {/* Верхня мітка з розміром - 20см від верхнього краю монтажного блоку */}
+      <Html
+        position={[0, topLabelY, -mountDepth + 0.21]}
+        center
+        transform
+        occlude={false}
+        style={{ pointerEvents: 'none' }}
+      >
+        <div style={{
+          background: 'rgba(245, 158, 11, 1)',
+          color: '#ffffff',
+          padding: '4px 4px',
+          borderRadius: '6px',
+          fontSize: '6px',
+          fontWeight: 600,
+          whiteSpace: 'nowrap',
+          boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
+          transform: 'translateX(-50%)'
+        }}>
+          {widthMm}mm
+        </div>
+      </Html>
+      
+      {/* Ліва лінія - 15см від лівого краю монтажного блоку */}
+      <mesh position={[leftLineX, 0, -mountDepth + 0.21]} rotation={[0, 0, Math.PI / 2]}>
+        <planeGeometry args={[mirrorHeight, 0.02]} />
+        <meshBasicMaterial 
+          map={lineTexture} 
+          opacity={1} 
+          transparent={false}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      
+      {/* Ліва мітка з розміром - 20см від лівого краю монтажного блоку */}
+      <Html
+        position={[leftLabelX, 0, -mountDepth + 0.21]}
+        center
+        transform
+        occlude={false}
+        style={{ pointerEvents: 'none' }}
+      >
+        <div style={{
+          background: 'rgba(245, 158, 11, 1)',
+          color: '#ffffff',
+          padding: '4px 4px',
+          borderRadius: '6px',
+          fontSize: '6px',
+          fontWeight: 600,
+          whiteSpace: 'nowrap',
+          boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
+          transform: 'translateY(-50%) rotate(-90deg)',
+          transformOrigin: 'center'
+        }}>
+          {heightMm}mm
+        </div>
+      </Html>
     </group>
   );
 }
@@ -476,6 +674,115 @@ function Wall({ visible }: { visible: boolean }) {
   );
 }
 
+// Компонент для управління позицією камери
+function CameraController({ view, controlsRef }: { view?: "top" | "left" | "right" | "front"; controlsRef: React.MutableRefObject<any> }) {
+  const { camera } = useThree();
+
+  useEffect(() => {
+    if (!view) return;
+
+    const target = new THREE.Vector3(0, 1.1, 0);
+    let newPosition: [number, number, number];
+
+    switch (view) {
+      case "top":
+        // Піднімаємо камеру майже вертикально вгору від початкової позиції
+        // ТУТ ВПИСУЄТЬСЯ КУТ В ГРАДУСАХ (зараз 88° - майже вертикально вгору)
+        const angleDegrees = 70;
+        const angleRad = angleDegrees * (Math.PI / 180);
+        // Початкова позиція: [6.75, 1.1, 0], target: [0, 1.1, 0]
+        const distanceX = 6.75; // Відстань від target по X
+        const initialY = 1.1; // Висота target
+        const newY = initialY + distanceX * Math.tan(angleRad);
+        newPosition = [6.75, newY, 0];
+        break;
+      case "left":
+        // Повертаємо камеру на 54 градуси вліво від початкової позиції
+        // Початкова позиція: [6.75, 1.1, 0], target: [0, 1.1, 0]
+        // Відстань від target: 6.75
+        const leftAngleDegrees = 70; // ТУТ ВПИСУЄТЬСЯ КУТ В ГРАДУСАХ
+        const leftAngleRad = leftAngleDegrees * (Math.PI / 180);
+        const distance = 6.75; // Відстань від target
+        const leftX = distance * Math.cos(leftAngleRad);
+        const leftZ = distance * Math.sin(leftAngleRad);
+        newPosition = [leftX, 1.1, leftZ];
+        break;
+      case "right":
+        // Повертаємо камеру на 70 градусів вправо від початкової позиції
+        // Початкова позиція: [6.75, 1.1, 0], target: [0, 1.1, 0]
+        // Відстань від target: 6.75
+        const rightAngleDegrees = 70; // ТУТ ВПИСУЄТЬСЯ КУТ В ГРАДУСАХ
+        const rightAngleRad = rightAngleDegrees * (Math.PI / 180);
+        const rightDistance = 6.75; // Відстань від target
+        const rightX = rightDistance * Math.cos(rightAngleRad);
+        const rightZ = -rightDistance * Math.sin(rightAngleRad); // Мінус для обертання вправо
+        newPosition = [rightX, 1.1, rightZ];
+        break;
+      case "front":
+        // Повертаємо камеру до початкової позиції
+        newPosition = [6.75, 1.1, 0];
+        break;
+      default:
+        newPosition = [6.75, 1.1, 0];
+    }
+
+    // Плавна анімація переміщення камери
+    const startPosition = new THREE.Vector3().copy(camera.position);
+    const endPosition = new THREE.Vector3(...newPosition);
+    const startTarget = controlsRef.current?.target ? new THREE.Vector3().copy(controlsRef.current.target) : target.clone();
+
+    // Тимчасово вимикаємо OrbitControls під час анімації
+    const wasEnabled = controlsRef.current?.enabled ?? true;
+    if (controlsRef.current) {
+      controlsRef.current.enabled = false;
+    }
+
+    let progress = 0;
+    const duration = 800; // мілісекунди
+    const startTime = Date.now();
+
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      progress = Math.min(elapsed / duration, 1);
+      
+      // Easing функція для плавності - ease-in-out для повільнішої середини
+      const easeProgress = progress < 0.5
+        ? 2 * progress * progress
+        : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+      camera.position.lerpVectors(startPosition, endPosition, easeProgress);
+      
+      if (controlsRef.current) {
+        controlsRef.current.target.lerpVectors(startTarget, target, easeProgress);
+        controlsRef.current.update();
+      } else {
+        camera.lookAt(target);
+      }
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        // Фінальна позиція - встановлюємо точно
+        camera.position.copy(endPosition);
+        if (controlsRef.current) {
+          controlsRef.current.target.copy(target);
+          controlsRef.current.update();
+          // Повертаємо enabled після невеликої затримки
+          setTimeout(() => {
+            if (controlsRef.current) {
+              controlsRef.current.enabled = wasEnabled;
+            }
+          }, 100);
+        }
+      }
+    };
+
+    animate();
+  }, [view, camera, controlsRef]);
+
+  return null;
+}
+
 export default function MirrorScene({
   widthMm,
   heightMm,
@@ -490,8 +797,12 @@ export default function MirrorScene({
   showShelf = false,
   shelfWidthPercent = 80,
   showHygieneMirror = false,
-  hygieneMirrorCorner = "bottom-left"
+  hygieneMirrorCorner = "bottom-left",
+  cameraView,
+  showDimensions = false
 }: MirrorSceneProps) {
+  const controlsRef = useRef<any>(null);
+
   return (
     <Canvas
       shadows
@@ -499,6 +810,8 @@ export default function MirrorScene({
       gl={{ toneMappingExposure: 3.5 }}
     >
       <color attach="background" args={["#ffffff"]} />
+
+      <CameraController view={cameraView} controlsRef={controlsRef} />
 
       {/* Освітлення тільки з потолка, щоб не було бліків в дзеркалі */}
       <ambientLight intensity={3.0} />
@@ -563,6 +876,9 @@ export default function MirrorScene({
       >
         <Wall visible={showWall} />
         <MirrorObject widthMm={widthMm} heightMm={heightMm} showroomLight={showroomLight} />
+        {showDimensions && (
+          <MirrorDimensions widthMm={widthMm} heightMm={heightMm} />
+        )}
         {/* Годинник в дзеркалі (відображається в центрі або вибраному куті) */}
         {showClock && (
           <>
@@ -584,11 +900,12 @@ export default function MirrorScene({
       </group>
 
       <OrbitControls
+        ref={controlsRef}
         enablePan={true}
         enableZoom={true}
         zoomSpeed={0.7}
         rotateSpeed={0.7}
-        maxPolarAngle={Math.PI / 1.8}
+        maxPolarAngle={Math.PI / 1.1}
         target={[0, 1.1, 0]}
         minDistance={1}
         maxDistance={10}

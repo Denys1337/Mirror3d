@@ -17,8 +17,17 @@ export default function HomePage() {
   const [showLight, setShowLight] = useState(false);
   const [showClock, setShowClock] = useState(false);
   const [clockCorner, setClockCorner] = useState<"top-left" | "top-center" | "top-right" | "right-center" | "bottom-right" | "bottom-center" | "bottom-left" | "left-center" | null>(null);
+  const [showSocket, setShowSocket] = useState(false);
+  const [socketCorner, setSocketCorner] = useState<"top-left" | "top-center" | "top-right" | "right-center" | "bottom-right" | "bottom-center" | "bottom-left" | "left-center" | null>(null);
+  const [showTouchSensor, setShowTouchSensor] = useState(false);
+  const [touchSensorCorner, setTouchSensorCorner] = useState<"top-left" | "top-center" | "top-right" | "right-center" | "bottom-right" | "bottom-center" | "bottom-left" | "left-center" | null>(null);
+  const [showSchminkspiegel, setShowSchminkspiegel] = useState(false);
+  const [schminkspiegelCorner, setSchminkspiegelCorner] = useState<"top-left" | "top-center" | "top-right" | "right-center" | "bottom-right" | "bottom-center" | "bottom-left" | "left-center" | null>(null);
   const [cameraView, setCameraView] = useState<"top" | "left" | "right" | "front" | undefined>(undefined);
   const [activeToolButton, setActiveToolButton] = useState<"wall" | "light" | "ruler" | "cube" | null>(null);
+  const [lightingMode, setLightingMode] = useState<"none" | "sides" | "frame" | "top-sides">("none");
+  const [showShelf, setShowShelf] = useState(false);
+  const [shelfLengthMm, setShelfLengthMm] = useState(800);
 
   // Preisberechnung
   const calculatePrice = () => {
@@ -106,8 +115,20 @@ export default function HomePage() {
             showClock={showClock}
             clockCorner={clockCorner}
             onClockCornerChange={setClockCorner}
+            showSocket={showSocket}
+            socketCorner={socketCorner}
+            onSocketCornerChange={setSocketCorner}
+            showTouchSensor={showTouchSensor}
+            touchSensorCorner={touchSensorCorner}
+            onTouchSensorCornerChange={setTouchSensorCorner}
+            showSchminkspiegel={showSchminkspiegel}
+            schminkspiegelCorner={schminkspiegelCorner}
+            onSchminkspiegelCornerChange={setSchminkspiegelCorner}
             cameraView={cameraView}
             showDimensions={activeToolButton === "ruler"}
+            lightingMode={lightingMode}
+            showShelf={showShelf}
+            shelfLengthMm={shelfLengthMm}
           />
           <div className="dimension-badge">
             <span>Breite: {widthMm} mm</span>
@@ -226,6 +247,192 @@ export default function HomePage() {
               </button>
             </div>
           </div>
+        </div>
+        <div className="lighting-select-panel">
+          <div className="lighting-select-title">Beleuchtung auf dem Spiegel</div>
+          <select
+            className="lighting-select"
+            value={lightingMode}
+            onChange={(e) =>
+              setLightingMode(e.target.value as "none" | "sides" | "frame" | "top-sides")
+            }
+          >
+            <option value="none">Keine Beleuchtung</option>
+            <option value="sides">Seitliche Streifen</option>
+            <option value="frame">Rahmen oben + Seiten</option>
+            <option value="top-sides">Oben + Seiten</option>
+          </select>
+          <label className="lighting-shelf-row">
+            <input
+              type="checkbox"
+              checked={showShelf}
+              onChange={(e) => setShowShelf(e.target.checked)}
+            />
+            <span>Glasablage anzeigen</span>
+          </label>
+          {showShelf && (
+            <div className="shelf-width-control">
+              <div className="shelf-width-scale">
+                <span>
+                  Min {500} mm
+                </span>
+                <span className="dimension-scale-current">
+                  {shelfLengthMm}{" "}
+                  mm
+                </span>
+                <span>
+                  Max {Math.max(widthMm - 160, 500)} mm
+                </span>
+              </div>
+              <input
+                className="shelf-width-slider"
+                type="range"
+                min={500}
+                max={Math.max(widthMm - 160, 500)}
+                step={10}
+                value={shelfLengthMm}
+                onChange={(e) => setShelfLengthMm(Number(e.target.value))}
+              />
+            </div>
+          )}
+          <label className="lighting-shelf-row" style={{ marginTop: 8 }}>
+            <input
+              type="checkbox"
+              checked={showSocket}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setShowSocket(checked);
+                if (checked) {
+                  setSocketCorner(null);
+                }
+              }}
+            />
+            <span>Steckdose anzeigen</span>
+          </label>
+          {showSocket && (
+            <select
+              className="lighting-select"
+              style={{ marginTop: 8 }}
+              value={socketCorner || ""}
+              onChange={(e) =>
+                setSocketCorner(
+                  e.target.value === ""
+                    ? null
+                    : (e.target.value as
+                        | "top-left"
+                        | "top-center"
+                        | "top-right"
+                        | "right-center"
+                        | "bottom-right"
+                        | "bottom-center"
+                        | "bottom-left"
+                        | "left-center")
+                )
+              }
+            >
+              <option value="">Mitte (Auswahl mit Kreis)</option>
+              <option value="top-left">Oben links</option>
+              <option value="top-center">Oben Mitte</option>
+              <option value="top-right">Oben rechts</option>
+              <option value="right-center">Rechts Mitte</option>
+              <option value="bottom-right">Unten rechts</option>
+              <option value="bottom-center">Unten Mitte</option>
+              <option value="bottom-left">Unten links</option>
+              <option value="left-center">Links Mitte</option>
+            </select>
+          )}
+          <label className="lighting-shelf-row" style={{ marginTop: 8 }}>
+            <input
+              type="checkbox"
+              checked={showTouchSensor}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setShowTouchSensor(checked);
+                if (checked) {
+                  setTouchSensorCorner(null);
+                }
+              }}
+            />
+            <span>Touch-Sensor anzeigen</span>
+          </label>
+          {showTouchSensor && (
+            <select
+              className="lighting-select"
+              style={{ marginTop: 8 }}
+              value={touchSensorCorner || ""}
+              onChange={(e) =>
+                setTouchSensorCorner(
+                  e.target.value === ""
+                    ? null
+                    : (e.target.value as
+                        | "top-left"
+                        | "top-center"
+                        | "top-right"
+                        | "right-center"
+                        | "bottom-right"
+                        | "bottom-center"
+                        | "bottom-left"
+                        | "left-center")
+                )
+              }
+            >
+              <option value="">Mitte (Auswahl mit Kreis)</option>
+              <option value="top-left">Oben links</option>
+              <option value="top-center">Oben Mitte</option>
+              <option value="top-right">Oben rechts</option>
+              <option value="right-center">Rechts Mitte</option>
+              <option value="bottom-right">Unten rechts</option>
+              <option value="bottom-center">Unten Mitte</option>
+              <option value="bottom-left">Unten links</option>
+              <option value="left-center">Links Mitte</option>
+            </select>
+          )}
+          <label className="lighting-shelf-row" style={{ marginTop: 8 }}>
+            <input
+              type="checkbox"
+              checked={showSchminkspiegel}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setShowSchminkspiegel(checked);
+                if (checked) {
+                  setSchminkspiegelCorner(null);
+                }
+              }}
+            />
+            <span>Schminkspiegel anzeigen</span>
+          </label>
+          {showSchminkspiegel && (
+            <select
+              className="lighting-select"
+              style={{ marginTop: 8 }}
+              value={schminkspiegelCorner || ""}
+              onChange={(e) =>
+                setSchminkspiegelCorner(
+                  e.target.value === ""
+                    ? null
+                    : (e.target.value as
+                        | "top-left"
+                        | "top-center"
+                        | "top-right"
+                        | "right-center"
+                        | "bottom-right"
+                        | "bottom-center"
+                        | "bottom-left"
+                        | "left-center")
+                )
+              }
+            >
+              <option value="">Mitte (Auswahl mit Kreis)</option>
+              <option value="top-left">Oben links</option>
+              <option value="top-center">Oben Mitte</option>
+              <option value="top-right">Oben rechts</option>
+              <option value="right-center">Rechts Mitte</option>
+              <option value="bottom-right">Unten rechts</option>
+              <option value="bottom-center">Unten Mitte</option>
+              <option value="bottom-left">Unten links</option>
+              <option value="left-center">Links Mitte</option>
+            </select>
+          )}
         </div>
       </div>
       

@@ -1,12 +1,95 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import MirrorScene from "../components/MirrorScene";
+import ConfigStep from "../components/ConfigStep";
 
 const MIN_MM = 400;
 const MAX_MM = 2800;
 
+const SIZE_LIMITS: Record<
+  string,
+  { b_min: number; b_max: number; h_min: number; h_max: number }
+> = {
+  "1152": {
+    b_min: 400,
+    b_max: 2500,
+    h_min: 400,
+    h_max: 2500,
+  },
+  "1155": {
+    b_min: 400,
+    b_max: 2500,
+    h_min: 400,
+    h_max: 2500,
+  },
+  "1389": {
+    b_min: 450,
+    b_max: 1200,
+    h_min: 450,
+    h_max: 1200,
+  },
+  "1893": {
+    b_min: 400,
+    b_max: 2000,
+    h_min: 400,
+    h_max: 2000,
+  },
+  "1913": {
+    b_min: 200,
+    b_max: 2500,
+    h_min: 200,
+    h_max: 2500,
+  },
+  "1948": {
+    b_min: 300,
+    b_max: 2000,
+    h_min: 300,
+    h_max: 2500,
+  },
+  "2129": {
+    b_min: 100,
+    b_max: 2500,
+    h_min: 100,
+    h_max: 2500,
+  },
+  "2130": {
+    b_min: 100,
+    b_max: 2500,
+    h_min: 100,
+    h_max: 2500,
+  },
+  "2435": {
+    b_min: 300,
+    b_max: 2000,
+    h_min: 300,
+    h_max: 2500,
+  },
+  "2470": {
+    b_min: 300,
+    b_max: 1000,
+    h_min: 300,
+    h_max: 1000,
+  },
+  "2546": {
+    b_min: 600,
+    b_max: 1000,
+    h_min: 600,
+    h_max: 1000,
+  },
+};
+
 export default function HomePage() {
+  const searchParams = useSearchParams();
+
+  // Значення з URL (?id=...&size=...)
+  const mirrorIdFromUrl = searchParams.get("id");
+  const mirrorSizeFromUrl = searchParams.get("size");
+
+  const [mirrorId, setMirrorId] = useState<string | null>(null);
+  const [mirrorSize, setMirrorSize] = useState<string | null>(null);
+
   const [widthMm, setWidthMm] = useState(900);
   const [heightMm, setHeightMm] = useState(1600);
   const [useManualWidth, setUseManualWidth] = useState(false);
@@ -28,6 +111,37 @@ export default function HomePage() {
   const [lightingMode, setLightingMode] = useState<"none" | "sides" | "frame" | "top-sides">("none");
   const [showShelf, setShowShelf] = useState(false);
   const [shelfLengthMm, setShelfLengthMm] = useState(800);
+  const [activeStep, setActiveStep] = useState<number>(1);
+
+  // Обмеження по розмірах залежно від mirrorSizeFromUrl
+  const sizeLimits = useMemo(() => {
+    if (mirrorSizeFromUrl && SIZE_LIMITS[mirrorSizeFromUrl]) {
+      return SIZE_LIMITS[mirrorSizeFromUrl];
+    }
+    return {
+      b_min: MIN_MM,
+      b_max: MAX_MM,
+      h_min: MIN_MM,
+      h_max: MAX_MM,
+    };
+  }, [mirrorSizeFromUrl]);
+
+  // Ініціалізуємо глобальну конфігурацію з URL (для сумісності з іншими скриптами)
+  useEffect(() => {
+    if (mirrorIdFromUrl || mirrorSizeFromUrl) {
+      setMirrorId(mirrorIdFromUrl);
+      setMirrorSize(mirrorSizeFromUrl);
+
+      if (typeof window !== "undefined") {
+        (window as any).mirrorConfig = (window as any).mirrorConfig || {};
+        if (mirrorIdFromUrl) (window as any).mirrorConfig.id = mirrorIdFromUrl;
+        if (mirrorSizeFromUrl)
+          (window as any).mirrorConfig.size = mirrorSizeFromUrl;
+        // Для дебага
+        console.log("mirrorConfig from URL:", (window as any).mirrorConfig);
+      }
+    }
+  }, [mirrorIdFromUrl, mirrorSizeFromUrl]);
 
   // Preisberechnung
   const calculatePrice = () => {
@@ -69,16 +183,32 @@ export default function HomePage() {
     }
   }, [useManualHeight]);
 
+  // Клэмпимо поточну ширину/висоту під актуальні ліміти
+  useEffect(() => {
+    setWidthMm((prev) =>
+      Math.min(sizeLimits.b_max, Math.max(sizeLimits.b_min, prev))
+    );
+    setHeightMm((prev) =>
+      Math.min(sizeLimits.h_max, Math.max(sizeLimits.h_min, prev))
+    );
+  }, [sizeLimits.b_min, sizeLimits.b_max, sizeLimits.h_min, sizeLimits.h_max]);
+
   return (
     <>
       <header className="page-header">
         <div className="steps-indicator">
-          <div className="step-item active">
+          <div
+            className={`step-item ${activeStep === 1 ? "active" : ""}`}
+            onClick={() => setActiveStep(1)}
+          >
             <div className="step-circle">1</div>
             <span className="step-label">Größe</span>
           </div>
           <div className="step-connector"></div>
-          <div className="step-item">
+          <div
+            className={`step-item ${activeStep === 2 ? "active" : ""}`}
+            onClick={() => setActiveStep(2)}
+          >
             <div className="step-circle">2</div>
             <span className="step-label">Beleuchtung</span>
           </div>
@@ -438,9 +568,13 @@ export default function HomePage() {
       
       <div className="controls-panel">
         <div className="panel-header">
-          <h2 className="panel-title">Maße</h2>
-          <p className="panel-step">SCHRITT 1</p>
+          <h2 className="panel-title">
+            {activeStep === 1 ? "Maße" : activeStep === 2 ? "Beleuchtung" : "Maße"}
+          </h2>
+          <p className="panel-step">SCHRITT {activeStep}</p>
         </div>
+
+        {activeStep === 1 && (
         <div className="config-section">
           {/* Breite */}
           <div className="dimension-group">
@@ -455,19 +589,22 @@ export default function HomePage() {
                     <input
                       type="number"
                       className="dimension-manual-input"
-                      min={MIN_MM}
-                      max={MAX_MM}
+                      min={sizeLimits.b_min}
+                      max={sizeLimits.b_max}
                       value={inputWidthMm}
                       onChange={(e) => {
                         setInputWidthMm(e.target.value);
                       }}
                       onBlur={(e) => {
                         const raw = Number(e.target.value);
-                        if (Number.isNaN(raw) || raw < MIN_MM) {
+                        if (Number.isNaN(raw) || raw < sizeLimits.b_min) {
                           setInputWidthMm(String(widthMm));
                           return;
                         }
-                        const clamped = Math.min(MAX_MM, Math.max(MIN_MM, raw));
+                        const clamped = Math.min(
+                          sizeLimits.b_max,
+                          Math.max(sizeLimits.b_min, raw)
+                        );
                         setWidthMm(clamped);
                         setInputWidthMm(String(clamped));
                       }}
@@ -480,7 +617,9 @@ export default function HomePage() {
                     <span className="dimension-manual-unit">mm</span>
                   </div>
                   <div className="dimension-manual-info">
-                    Die Breite muß ab 400 und bis 2500 mm liegen. Größere Abmessungen gerne auf Anfrage.
+                    Die Breite muß ab {sizeLimits.b_min} und bis{" "}
+                    {sizeLimits.b_max} mm liegen. Größere Abmessungen gerne auf
+                    Anfrage.
                   </div>
                 </div>
                 <button
@@ -497,24 +636,26 @@ export default function HomePage() {
             ) : (
               <>
                 <div className="dimension-scale">
-                  <span>{MIN_MM} mm</span>
+                  <span>{sizeLimits.b_min} mm</span>
                   <span className="dimension-scale-current">
                     {widthMm} mm
                   </span>
-                  <span>{MAX_MM} mm</span>
+                  <span>{sizeLimits.b_max} mm</span>
                 </div>
                 <input
                   className="dimension-slider"
                   type="range"
-                  min={MIN_MM}
-                  max={MAX_MM}
-                  step={50}
+                  min={sizeLimits.b_min}
+                  max={sizeLimits.b_max}
+                  step={10}
                   value={widthMm}
                   onChange={(e) => {
                     const value = Number(e.target.value);
                     setWidthMm(value);
                     const progress =
-                      ((value - MIN_MM) / (MAX_MM - MIN_MM)) * 100;
+                      ((value - sizeLimits.b_min) /
+                        (sizeLimits.b_max - sizeLimits.b_min)) *
+                      100;
                     e.target.style.setProperty(
                       "--slider-progress",
                       `${progress}%`
@@ -525,7 +666,9 @@ export default function HomePage() {
                       (e.target as HTMLInputElement).value
                     );
                     const progress =
-                      ((value - MIN_MM) / (MAX_MM - MIN_MM)) * 100;
+                      ((value - sizeLimits.b_min) /
+                        (sizeLimits.b_max - sizeLimits.b_min)) *
+                      100;
                     (e.target as HTMLInputElement).style.setProperty(
                       "--slider-progress",
                       `${progress}%`
@@ -533,7 +676,9 @@ export default function HomePage() {
                   }}
                   style={{
                     ["--slider-progress" as string]: `${
-                      ((widthMm - MIN_MM) / (MAX_MM - MIN_MM)) * 100
+                      ((widthMm - sizeLimits.b_min) /
+                        (sizeLimits.b_max - sizeLimits.b_min)) *
+                      100
                     }%`,
                   }}
                 />
@@ -566,19 +711,22 @@ export default function HomePage() {
                     <input
                       type="number"
                       className="dimension-manual-input"
-                      min={MIN_MM}
-                      max={MAX_MM}
+                      min={sizeLimits.h_min}
+                      max={sizeLimits.h_max}
                       value={inputHeightMm}
                       onChange={(e) => {
                         setInputHeightMm(e.target.value);
                       }}
                       onBlur={(e) => {
                         const raw = Number(e.target.value);
-                        if (Number.isNaN(raw) || raw < MIN_MM) {
+                        if (Number.isNaN(raw) || raw < sizeLimits.h_min) {
                           setInputHeightMm(String(heightMm));
                           return;
                         }
-                        const clamped = Math.min(MAX_MM, Math.max(MIN_MM, raw));
+                        const clamped = Math.min(
+                          sizeLimits.h_max,
+                          Math.max(sizeLimits.h_min, raw)
+                        );
                         setHeightMm(clamped);
                         setInputHeightMm(String(clamped));
                       }}
@@ -591,7 +739,8 @@ export default function HomePage() {
                     <span className="dimension-manual-unit">mm</span>
                   </div>
                   <div className="dimension-manual-info">
-                    Die Höhe muß ab 400 und bis 2500 mm liegen.
+                    Die Höhe muß ab {sizeLimits.h_min} und bis{" "}
+                    {sizeLimits.h_max} mm liegen.
                     <br />
                     Größere Abmessungen gerne auf Anfrage.
                   </div>
@@ -610,24 +759,26 @@ export default function HomePage() {
             ) : (
               <>
                 <div className="dimension-scale">
-                  <span>{MIN_MM} mm</span>
+                  <span>{sizeLimits.h_min} mm</span>
                   <span className="dimension-scale-current">
                     {heightMm} mm
                   </span>
-                  <span>{MAX_MM} mm</span>
+                  <span>{sizeLimits.h_max} mm</span>
                 </div>
                 <input
                   className="dimension-slider"
                   type="range"
-                  min={MIN_MM}
-                  max={MAX_MM}
-                  step={50}
+                  min={sizeLimits.h_min}
+                  max={sizeLimits.h_max}
+                  step={10}
                   value={heightMm}
                   onChange={(e) => {
                     const value = Number(e.target.value);
                     setHeightMm(value);
                     const progress =
-                      ((value - MIN_MM) / (MAX_MM - MIN_MM)) * 100;
+                      ((value - sizeLimits.h_min) /
+                        (sizeLimits.h_max - sizeLimits.h_min)) *
+                      100;
                     e.target.style.setProperty(
                       "--slider-progress",
                       `${progress}%`
@@ -638,7 +789,9 @@ export default function HomePage() {
                       (e.target as HTMLInputElement).value
                     );
                     const progress =
-                      ((value - MIN_MM) / (MAX_MM - MIN_MM)) * 100;
+                      ((value - sizeLimits.h_min) /
+                        (sizeLimits.h_max - sizeLimits.h_min)) *
+                      100;
                     (e.target as HTMLInputElement).style.setProperty(
                       "--slider-progress",
                       `${progress}%`
@@ -646,7 +799,9 @@ export default function HomePage() {
                   }}
                   style={{
                     ["--slider-progress" as string]: `${
-                      ((heightMm - MIN_MM) / (MAX_MM - MIN_MM)) * 100
+                      ((heightMm - sizeLimits.h_min) /
+                        (sizeLimits.h_max - sizeLimits.h_min)) *
+                      100
                     }%`,
                   }}
                 />
@@ -722,6 +877,12 @@ export default function HomePage() {
           </div> */}
 
         </div>
+        )}
+
+        {activeStep === 2 && (
+          <ConfigStep />
+        )}
+
         <div className="price-section">
           <div className="price-label">Gesamtpreis</div>
           <div className="price-row">
@@ -741,7 +902,11 @@ export default function HomePage() {
               </div>
             </div>
           </div>
-          <button className="primary-cta-button">
+          <button
+            className="primary-cta-button"
+            type="button"
+            onClick={() => setActiveStep(2)}
+          >
             Weiter zu Beleuchtung
             <span className="primary-cta-arrow">
               <img src="/images/arrowButton.svg" alt="" />

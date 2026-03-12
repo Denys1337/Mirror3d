@@ -233,7 +233,7 @@ main.app-root {
 
 .dimension-scale-current {
   text-align: center;
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 700;
   color: #f59e0b;
   line-height: 100%;
@@ -378,10 +378,8 @@ main.app-root {
 .dimension-manual-info {
   flex: 1;
   font-size: 8px;
-  line-height: 100%;
   background-color: rgba(211, 255, 227, 1);
-  font-family: "Inter", sans-serif;
-  font-style: 'Regular';
+  font-family: "Inter-Regular", sans-serif;
   font-weight: 400;
   color: rgba(51, 65, 85, 1);
   border-radius: 4px;

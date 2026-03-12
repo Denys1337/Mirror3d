@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import MirrorScene from "../components/MirrorScene";
 import ConfigStep from "../components/ConfigStep";
@@ -80,7 +80,7 @@ const SIZE_LIMITS: Record<
   },
 };
 
-export default function HomePage() {
+function HomePageContent() {
   const searchParams = useSearchParams();
 
   // Значення з URL (?id=...&size=...)
@@ -916,5 +916,13 @@ export default function HomePage() {
       </div>
       </main>
     </>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <HomePageContent />
+    </Suspense>
   );
 }

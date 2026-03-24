@@ -10,6 +10,9 @@ type RawResponse = {
   valid?: boolean;
   errorMessages?: Record<string, KonfigErrorEntry>;
   invalidGroups?: number[];
+  status?: string;
+  summ?: number;
+  fGesamtpreis?: number[];
 };
 
 function getKonfigResponseValue(data: unknown): RawResponse | undefined {
@@ -111,6 +114,9 @@ type GroupSelection = {
 
 type Props = {
   onSelectionChange?: (groups: GroupSelection[]) => void;
+  onSummChange?: (summ: number) => void;
+  widthMm?: number;
+  heightMm?: number;
 };
 
 /** JTL liefert oft HTML-Entities (&szlig;, &auml;) — für UI wie Original ohne Rohtext */
@@ -179,6 +185,32 @@ function readUrlToken(): string | null {
   return t || null;
 }
 
+function readUrlProductId(): string | null {
+  if (typeof window === "undefined") return null;
+  const sp = new URLSearchParams(window.location.search);
+  const id = sp.get("id")?.trim();
+  return id || null;
+}
+
+const DEFAULT_ARTIKEL_ID = "17406";
+const DEFAULT_ARTICAL_NUMBER = "23582";
+
+function resolveProductIdsFromUrl(): {
+  artikelId: string;
+  articalNumber: string;
+} {
+  const fromUrl = readUrlProductId();
+  if (fromUrl && /^\d+$/.test(fromUrl)) {
+    // URL id у цьому проєкті відповідає артикулу/номерy (artical_number),
+    // але JTL поля a/artikel очікують внутрішній kArtikel (для цього товару 17406).
+    return { artikelId: DEFAULT_ARTIKEL_ID, articalNumber: fromUrl };
+  }
+  return {
+    artikelId: DEFAULT_ARTIKEL_ID,
+    articalNumber: DEFAULT_ARTICAL_NUMBER,
+  };
+}
+
 /**
  * kKonfiggruppe, die im Original-Shop nicht in den ~16 «Haupt»-Dropdowns stehen,
  * sondern erst erscheinen, wenn Abhängigkeiten sie aktivieren (Position…, Anschluss…, usw.).
@@ -235,6 +267,16 @@ function maybeUpdateJtlTokenFromResponse(
   if (nt) setToken(nt);
 }
 
+/** Лише `summ` з response — UI показує ціну тільки після такої відповіді. */
+function extractJtlSumm(data: unknown): number | null {
+  const response = getKonfigResponseValue(data);
+  if (!response) return null;
+  if (typeof response.summ === "number" && Number.isFinite(response.summ)) {
+    return response.summ;
+  }
+  return null;
+}
+
 /** Той самий дефолт, що в app/api/config/route.ts */
 const DEFAULT_JTL_TOKEN_CLIENT =
   "6c08e5033bc977face39247c0d040e8c354c5038509611843a135f4014ca78fe";
@@ -243,7 +285,47 @@ const DEFAULT_JTL_TOKEN_CLIENT =
  * Step 2: Konfiguration der Optionen aus der ursprünglichen JTL-Konfiguration (artikel.js / sdfsd.json).
  * Liest die Gruppen aus sdfsd.json und rendert sie als Selects / Checkboxen.
  */
-export default function ConfigStep({ onSelectionChange }: Props) {
+function resolveMirrorDimensions(
+  fallback: { widthMm: number; heightMm: number },
+  widthFromStep1?: number,
+  heightFromStep1?: number
+) {
+  const w =
+    typeof widthFromStep1 === "number" && Number.isFinite(widthFromStep1) && widthFromStep1 > 0
+      ? Math.round(widthFromStep1)
+      : fallback.widthMm;
+  const h =
+    typeof heightFromStep1 === "number" && Number.isFinite(heightFromStep1) && heightFromStep1 > 0
+      ? Math.round(heightFromStep1)
+      : fallback.heightMm;
+  return { widthMm: w, heightMm: h };
+}
+
+function isFinitePositive(n: number | undefined): n is number {
+  return typeof n === "number" && Number.isFinite(n) && n > 0;
+}
+
+function pickCustomSizeItemId(group0: RawConfigGroup | undefined): number | null {
+  const items = group0?.oItem_arr ?? [];
+  if (!items.length) return null;
+
+  // Найнадійніше для JTL: Sondermaß item (у прикладі це 1155)
+  const byName = items.find((i) => /sonderma/i.test(i.cName ?? ""));
+  if (byName) return byName.kKonfigitem;
+
+  // fallback: item з кількістю/діапазоном, зазвичай це custom-size
+  const byRange = items.find((i) => i.bAnzahl && (i.fMax ?? 0) > 1000);
+  if (byRange) return byRange.kKonfigitem;
+
+  return null;
+}
+
+export default function ConfigStep({
+  onSelectionChange,
+  onSummChange,
+  widthMm: widthMmFromStep1,
+  heightMm: heightMmFromStep1,
+}: Props) {
   const [configGroups, setConfigGroups] = useState<RawConfigGroup[]>([]);
   const [jtlToken, setJtlToken] = useState<string | null>(null);
   const [configApiWarning, setConfigApiWarning] = useState<string | null>(null);
@@ -251,6 +333,7 @@ export default function ConfigStep({ onSelectionChange }: Props) {
     null
   );
   const singleDropdownRootRef = useRef<HTMLDivElement | null>(null);
+  const lastSentSizeKeyRef = useRef<string | null>(null);
 
   // Витягуємо response.oKonfig_arr через API, щоб не імпортувати великий JSON напряму
   useEffect(() => {
@@ -315,6 +398,14 @@ export default function ConfigStep({ onSelectionChange }: Props) {
   );
 
   const [selections, setSelections] = useState<GroupSelection[]>([]);
+
+  const emitSummIfExists = (data: unknown) => {
+    if (!onSummChange) return;
+    const summ = extractJtlSumm(data);
+    if (summ != null) {
+      onSummChange(summ);
+    }
+  };
 
   // Початкова ініціалізація вибору (один раз). Далі — з відповідей buildConfiguration / load_konfig.
   useEffect(() => {
@@ -381,6 +472,36 @@ export default function ConfigStep({ onSelectionChange }: Props) {
     };
   };
 
+  const deriveEffectiveSizeContext = (groups: RawConfigGroup[]) => {
+    const base = deriveCustomSizeFromGroup0(groups);
+    const hasStep1Dims =
+      isFinitePositive(widthMmFromStep1) && isFinitePositive(heightMmFromStep1);
+
+    if (!hasStep1Dims) {
+      return {
+        ...base,
+        mirrorDims: { widthMm: base.widthMm, heightMm: base.heightMm },
+      };
+    }
+
+    const mirrorDims = resolveMirrorDimensions(
+      { widthMm: base.widthMm, heightMm: base.heightMm },
+      widthMmFromStep1,
+      heightMmFromStep1
+    );
+
+    // Якщо розмір задається на Step 1 — для коректного перерахунку шлемо Sondermaß item.
+    const forcedCustomItem = pickCustomSizeItemId(groups[0]);
+
+    return {
+      customSizeConfigItem: forcedCustomItem ?? base.customSizeConfigItem,
+      customSizeConfigGroup: base.customSizeConfigGroup,
+      widthMm: mirrorDims.widthMm,
+      heightMm: mirrorDims.heightMm,
+      mirrorDims,
+    };
+  };
+
   const buildKonfigItemPreice = (groups: RawConfigGroup[]) => {
     const map: Record<string, number> = {};
     for (const g of groups) {
@@ -418,7 +539,7 @@ export default function ConfigStep({ onSelectionChange }: Props) {
     nextSelections: GroupSelection[]
   ) => {
     const { customSizeConfigItem, customSizeConfigGroup } =
-      deriveCustomSizeFromGroup0(groups);
+      deriveEffectiveSizeContext(groups);
     const item: Record<string, { "0": string }> = {};
     if (customSizeConfigGroup && customSizeConfigItem) {
       item[String(customSizeConfigGroup)] = {
@@ -485,8 +606,8 @@ export default function ConfigStep({ onSelectionChange }: Props) {
     if (!groupsBase.length || !nextSelections.length) return;
 
     const opt = groupsBase.slice(1);
-    const { customSizeConfigItem, customSizeConfigGroup, widthMm, heightMm } =
-      deriveCustomSizeFromGroup0(groupsBase);
+    const { customSizeConfigItem, customSizeConfigGroup, mirrorDims } =
+      deriveEffectiveSizeContext(groupsBase);
     const konfigItemPreice = buildKonfigItemPreice(groupsBase);
 
     const items = [
@@ -500,19 +621,21 @@ export default function ConfigStep({ onSelectionChange }: Props) {
       String(customSizeConfigItem),
     ];
 
+    const { artikelId } = resolveProductIdsFromUrl();
+
     const payloadOrdered = {
       customSizeConfigItem,
       customSizeConfigGroup,
       action: "recalculate_prices",
       items,
-      width: widthMm,
-      height: heightMm,
-      width1: widthMm,
-      height1: heightMm,
-      width2: widthMm,
-      height2: heightMm,
+      width: mirrorDims.widthMm,
+      height: mirrorDims.heightMm,
+      width1: mirrorDims.widthMm,
+      height1: mirrorDims.heightMm,
+      width2: mirrorDims.widthMm,
+      height2: mirrorDims.heightMm,
       is_custom_size: 1,
-      artikel: "17406",
+      artikel: artikelId,
       konfigItemPreice,
     };
 
@@ -534,6 +657,7 @@ export default function ConfigStep({ onSelectionChange }: Props) {
 
     const data = await res.json();
     maybeUpdateJtlTokenFromResponse(data, setJtlToken);
+    emitSummIfExists(data);
 
     applyKonfigValidityWarning(data, setConfigApiWarning);
 
@@ -555,20 +679,22 @@ export default function ConfigStep({ onSelectionChange }: Props) {
 
     const token = jtlToken ?? DEFAULT_JTL_TOKEN_CLIENT;
     const opt = groups.slice(1);
-    const { widthMm, heightMm, customSizeConfigItem, customSizeConfigGroup } =
-      deriveCustomSizeFromGroup0(groups);
+    const { customSizeConfigItem, customSizeConfigGroup, mirrorDims } =
+      deriveEffectiveSizeContext(groups);
     const item = buildConfigurationItemMap(groups, opt, nextSelections);
+
+    const { artikelId, articalNumber } = resolveProductIdsFromUrl();
 
     const buildParams = {
       jtl_token: token,
       inWarenkorb: "1",
-      a: "17406",
+      a: artikelId,
       wke: "1",
       show: "1",
       kKundengruppe: "3",
       kSprache: "1",
       eigenschaftwert: { "1601": "", "1602": "" },
-      artical_number: "23582",
+      artical_number: articalNumber,
       data_file_exist: "1",
       mir_type: "square",
       str_type: "xside",
@@ -584,8 +710,8 @@ export default function ConfigStep({ onSelectionChange }: Props) {
       item,
       customSizeConfigItem: String(customSizeConfigItem),
       customSizeConfigGroup: String(customSizeConfigGroup),
-      breite: String(widthMm),
-      hoehe: String(heightMm),
+      breite: String(mirrorDims.widthMm),
+      hoehe: String(mirrorDims.heightMm),
       schraege_text: "",
       konfig_comment: "",
       anzahl: "1",
@@ -608,8 +734,8 @@ export default function ConfigStep({ onSelectionChange }: Props) {
     }
 
     const buildData = await buildRes.json();
-    const nt = extractJtlToken(buildData);
-    if (nt) setJtlToken(nt);
+    maybeUpdateJtlTokenFromResponse(buildData, setJtlToken);
+    emitSummIfExists(buildData);
 
     applyKonfigValidityWarning(buildData, setConfigApiWarning);
 
@@ -667,6 +793,34 @@ export default function ConfigStep({ onSelectionChange }: Props) {
     });
   };
 
+  // Якщо розмір на Step 1 змінився — одразу перерахувати конфігурацію/ціну на бекенді.
+  useEffect(() => {
+    if (!configGroups.length || !selections.length) return;
+    if (
+      typeof widthMmFromStep1 !== "number" ||
+      !Number.isFinite(widthMmFromStep1) ||
+      widthMmFromStep1 <= 0 ||
+      typeof heightMmFromStep1 !== "number" ||
+      !Number.isFinite(heightMmFromStep1) ||
+      heightMmFromStep1 <= 0
+    ) {
+      return;
+    }
+
+    const sizeKey = `${Math.round(widthMmFromStep1)}x${Math.round(
+      heightMmFromStep1
+    )}`;
+    if (lastSentSizeKeyRef.current === sizeKey) return;
+
+    lastSentSizeKeyRef.current = sizeKey;
+    void buildConfigurationThenLoadKonfig(selections);
+  }, [
+    widthMmFromStep1,
+    heightMmFromStep1,
+    selections,
+    configGroups.length,
+  ]);
+
   if (configGroups.length === 0) {
     return (
       <section className="config-step-2 config-jtl-compact">
@@ -682,11 +836,6 @@ export default function ConfigStep({ onSelectionChange }: Props) {
   return (
     <section className="config-step-2 config-jtl-compact">
       <div className="config-section">
-        {configApiWarning ? (
-          <div className="jtl-config-api-warning" role="alert">
-            {configApiWarning}
-          </div>
-        ) : null}
         {optionGroups.map((group, idx) => {
           /* Як оригінал: ~16 основних рядків; відкладені групи лише коли bAktiv з бекенда. items[] для load_konfig лишається повним. */
           if (!shouldShowConfigGroupRow(group)) return null;

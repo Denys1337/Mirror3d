@@ -104,17 +104,17 @@ function extractSetCookieHeaders(res: Response): string[] {
 const DEFAULT_JTL_TOKEN =
   "6c08e5033bc977face39247c0d040e8c354c5038509611843a135f4014ca78fe";
 
-function buildBuildConfigurationIoBody(token: string): string {
+function buildBuildConfigurationIoBody(token: string, productId: string): string {
   const params = {
     jtl_token: token,
     inWarenkorb: "1",
-    a: "17406",
+    a: productId,
     wke: "1",
     show: "1",
     kKundengruppe: "3",
     kSprache: "1",
     eigenschaftwert: { "1601": "", "1602": "" },
-    artical_number: "23582",
+    artical_number: productId,
     data_file_exist: "1",
     mir_type: "square",
     str_type: "xside",
@@ -153,10 +153,12 @@ export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const tokenParam = url.searchParams.get("jtl_token");
+    const idParam = url.searchParams.get("id")?.trim();
     const token =
       tokenParam?.trim() ||
       readEnvTrim("JTL_TOKEN") ||
       DEFAULT_JTL_TOKEN;
+    const productId = idParam && /^\d+$/.test(idParam) ? idParam : "17406";
 
     const outboundCookie = remoteCookieHeader;
     const cookieStats = cookieHeaderStats(outboundCookie);
@@ -171,7 +173,7 @@ export async function GET(req: Request) {
         ...BROWSER_LIKE_HEADERS,
         ...(outboundCookie ? { Cookie: outboundCookie } : {}),
       },
-      body: buildBuildConfigurationIoBody(token),
+      body: buildBuildConfigurationIoBody(token, productId),
     });
 
     if (!res.ok) {
@@ -217,7 +219,24 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const input = await req.json();
+    const rawReqBody = await req.text();
+    if (!rawReqBody?.trim()) {
+      return NextResponse.json(
+        { error: "Invalid body: empty request body" },
+        { status: 400 }
+      );
+    }
+
+    let input: any;
+    try {
+      input = JSON.parse(rawReqBody);
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid body: expected JSON payload" },
+        { status: 400 }
+      );
+    }
+
     const ioBody: string | undefined = input?.ioBody;
     if (!ioBody || typeof ioBody !== "string") {
       return NextResponse.json(
@@ -263,7 +282,13 @@ export async function POST(req: Request) {
       );
     }
 
-    const data = await res.json().catch(async () => ({ raw: await res.text() }));
+    const rawRemoteBody = await res.text();
+    let data: unknown;
+    try {
+      data = JSON.parse(rawRemoteBody);
+    } catch {
+      data = { raw: rawRemoteBody };
+    }
     return NextResponse.json(data, {
       headers: {
         "x-jtl-remote-url": IO_ENDPOINT,

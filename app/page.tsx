@@ -92,6 +92,9 @@ function HomePageContent() {
 
   const [widthMm, setWidthMm] = useState(900);
   const [heightMm, setHeightMm] = useState(1600);
+  // Розміри, які відправляємо в JTL (commit only: slider mouse up / input blur)
+  const [committedWidthMm, setCommittedWidthMm] = useState(900);
+  const [committedHeightMm, setCommittedHeightMm] = useState(1600);
   const [useManualWidth, setUseManualWidth] = useState(false);
   const [useManualHeight, setUseManualHeight] = useState(false);
   const [inputWidthMm, setInputWidthMm] = useState("900");
@@ -112,6 +115,25 @@ function HomePageContent() {
   const [showShelf, setShowShelf] = useState(false);
   const [shelfLengthMm, setShelfLengthMm] = useState(800);
   const [activeStep, setActiveStep] = useState<number>(1);
+  const [jtlSumm, setJtlSumm] = useState<number | null>(null);
+  const [stepRestored, setStepRestored] = useState(false);
+
+  // Restore step after mount (avoid SSR/client hydration mismatch).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const raw = window.sessionStorage.getItem("mirror3d-active-step");
+    const parsed = Number(raw);
+    if (parsed >= 1 && parsed <= 3) {
+      setActiveStep(parsed);
+    }
+    setStepRestored(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!stepRestored) return;
+    window.sessionStorage.setItem("mirror3d-active-step", String(activeStep));
+  }, [activeStep, stepRestored]);
 
   // Обмеження по розмірах залежно від mirrorSizeFromUrl
   const sizeLimits = useMemo(() => {
@@ -155,8 +177,6 @@ function HomePageContent() {
     return basePrice + clockPrice;
   };
 
-  const totalPrice = calculatePrice();
-
   // Синхронізуємо значення інпутів зі значеннями слайдерів
   useEffect(() => {
     if (!useManualWidth) {
@@ -189,6 +209,12 @@ function HomePageContent() {
       Math.min(sizeLimits.b_max, Math.max(sizeLimits.b_min, prev))
     );
     setHeightMm((prev) =>
+      Math.min(sizeLimits.h_max, Math.max(sizeLimits.h_min, prev))
+    );
+    setCommittedWidthMm((prev) =>
+      Math.min(sizeLimits.b_max, Math.max(sizeLimits.b_min, prev))
+    );
+    setCommittedHeightMm((prev) =>
       Math.min(sizeLimits.h_max, Math.max(sizeLimits.h_min, prev))
     );
   }, [sizeLimits.b_min, sizeLimits.b_max, sizeLimits.h_min, sizeLimits.h_max]);
@@ -606,6 +632,7 @@ function HomePageContent() {
                           Math.max(sizeLimits.b_min, raw)
                         );
                         setWidthMm(clamped);
+                        setCommittedWidthMm(clamped);
                         setInputWidthMm(String(clamped));
                       }}
                       onKeyDown={(e) => {
@@ -660,6 +687,13 @@ function HomePageContent() {
                       "--slider-progress",
                       `${progress}%`
                     );
+                  }}
+                  onMouseUp={(e) => {
+                    if (e.button !== 0) return;
+                    setCommittedWidthMm(Number((e.target as HTMLInputElement).value));
+                  }}
+                  onTouchEnd={(e) => {
+                    setCommittedWidthMm(Number((e.target as HTMLInputElement).value));
                   }}
                   onInput={(e) => {
                     const value = Number(
@@ -728,6 +762,7 @@ function HomePageContent() {
                           Math.max(sizeLimits.h_min, raw)
                         );
                         setHeightMm(clamped);
+                        setCommittedHeightMm(clamped);
                         setInputHeightMm(String(clamped));
                       }}
                       onKeyDown={(e) => {
@@ -783,6 +818,13 @@ function HomePageContent() {
                       "--slider-progress",
                       `${progress}%`
                     );
+                  }}
+                  onMouseUp={(e) => {
+                    if (e.button !== 0) return;
+                    setCommittedHeightMm(Number((e.target as HTMLInputElement).value));
+                  }}
+                  onTouchEnd={(e) => {
+                    setCommittedHeightMm(Number((e.target as HTMLInputElement).value));
                   }}
                   onInput={(e) => {
                     const value = Number(
@@ -879,18 +921,28 @@ function HomePageContent() {
         </div>
         )}
 
-        {activeStep === 2 && (
-          <ConfigStep />
-        )}
+        <div
+          style={{ display: activeStep === 2 ? "block" : "none" }}
+          aria-hidden={activeStep !== 2}
+        >
+          <ConfigStep
+            widthMm={committedWidthMm}
+            heightMm={committedHeightMm}
+            onSummChange={setJtlSumm}
+          />
+        </div>
 
         <div className="price-section">
           <div className="price-label">Gesamtpreis</div>
           <div className="price-row">
             <div className="price-value">
-              {totalPrice
-                .toFixed(2)
-                .replace(".", ",")}{" "}
-              €
+              {jtlSumm == null ? (
+                "—"
+              ) : (
+                <>
+                  {jtlSumm.toFixed(2).replace(".", ",")} €
+                </>
+              )}
             </div>
             <div className="price-delivery-info">
               <span className="price-delivery-text">

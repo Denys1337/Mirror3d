@@ -172,6 +172,13 @@ function buildImageUrl(path: string | null | undefined): string | null {
   return `${JTL_IMAGE_BASE}${p}`;
 }
 
+function readUrlToken(): string | null {
+  if (typeof window === "undefined") return null;
+  const sp = new URLSearchParams(window.location.search);
+  const t = sp.get("token")?.trim();
+  return t || null;
+}
+
 /**
  * kKonfiggruppe, die im Original-Shop nicht in den ~16 «Haupt»-Dropdowns stehen,
  * sondern erst erscheinen, wenn Abhängigkeiten sie aktivieren (Position…, Anschluss…, usw.).
@@ -250,7 +257,12 @@ export default function ConfigStep({ onSelectionChange }: Props) {
     let cancelled = false;
     async function loadConfig() {
       try {
-        const res = await fetch("/api/config", { cache: "no-store" });
+        const urlToken = readUrlToken();
+        if (urlToken) setJtlToken(urlToken);
+        const apiUrl = urlToken
+          ? `/api/config?jtl_token=${encodeURIComponent(urlToken)}`
+          : "/api/config";
+        const res = await fetch(apiUrl, { cache: "no-store" });
         if (!res.ok) {
           console.error("Failed to load /api/config:", res.status);
           return;

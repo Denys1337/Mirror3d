@@ -96,6 +96,7 @@ type RawConfigItem = {
   fPreis?: [number, number];
   cName: string;
   cBeschreibung?: string | null;
+  cBildPfad?: string | null;
   bAnzahl: boolean;
   fInitial: number;
   fMin: number;

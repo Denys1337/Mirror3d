@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 type KonfigErrorEntry = { message?: string; group?: number };
 
@@ -169,6 +170,10 @@ function optionLabel(item: RawConfigItem): string {
 }
 
 const JTL_IMAGE_BASE = "https://test.schreiber-design.com/";
+/** Той самий HTML, що на JTL, але через наш API — інакше X-Frame-Options: sameorigin блокує iframe. */
+function buildOptionInfoFrameSrc(kKonfiggruppe: number): string {
+  return `/api/jtl-option-html/${kKonfiggruppe}`;
+}
 
 function buildImageUrl(path: string | null | undefined): string | null {
   const p = (path ?? "").trim();
@@ -216,19 +221,73 @@ function resolveProductIdsFromUrl(): {
  * sondern erst erscheinen, wenn Abhängigkeiten sie aktivieren (Position…, Anschluss…, usw.).
  * Ohne diese Regel blendet man bei bAktiv:false fast alles aus → nur 2–3 Selects.
  */
-/** Підгрупи, що на сторінці з’являються лише після вибору в «батьківському» селекті (JTL ставить bAktiv). Приклад: Uhr/Wetterstation (11) → Position der Anzeige (428), Anschluss (396). */
+/**
+ * Підгрупи, що на оригіналі ховаються, поки батьківський вибір їх не «вмикає» (Position…, Anschluss…).
+ * Не додавати сюди батьківські групи на кшталт kKonfiggruppe 11: при bAktiv:false на групі й без bAktiv на
+ * пунктах рядок зникне повністю — користувач не зможе зробити перший вибір.
+ */
 const DEFERRED_KONFIG_GRUPPE_IDS = new Set<number>([
   476, 493, 432, 431, 367, 428, 396, 407, 404, 389,
 ]);
 
-function shouldShowConfigGroupRow(group: RawConfigGroup): boolean {
+const UHR_WETTERSTATION_KONFIG_GRUPPE = 11;
+const BEFESTIGUNG_KONFIG_GRUPPE = 288;
+
+/** Після вибору в «Uhr / Wetterstation» з’являються Position der Anzeige (428) та Anschluss (396). */
+const DEFERRED_AFTER_UHR_GRUPPEN = new Set<number>([428, 396]);
+
+/**
+ * Варіанти Befestigung «montiert» / спец. — на оригіналі під ними часто з’являється «Optionale Montagelösung» (476).
+ */
+const MONTAGE_AKTIVIERT_476 = new Set<number>([
+  2584, 1471, 1900, 1901,
+]);
+
+function selectionItemIdForKonfigGruppe(
+  optionGroups: RawConfigGroup[],
+  selections: GroupSelection[],
+  kKonfiggruppe: number
+): number | null {
+  const idx = optionGroups.findIndex((g) => g.kKonfiggruppe === kKonfiggruppe);
+  if (idx < 0) return null;
+  const sid = selections.find((s) => s.groupIndex === idx)?.selectedItemIds?.[0];
+  return sid != null && sid > 0 ? sid : null;
+}
+
+/**
+ * Відкладені рядки: за JTL (bAktiv / пункти) або за відомими залежностями від батьківського селекта —
+ * щоб після відповіді одразу з’являлись поля, навіть якщо valid:false і бекенд не проставив bAktiv.
+ */
+function shouldShowConfigGroupRow(
+  group: RawConfigGroup,
+  optionGroups: RawConfigGroup[],
+  selections: GroupSelection[]
+): boolean {
   const id = group.kKonfiggruppe;
-  if (id != null && DEFERRED_KONFIG_GRUPPE_IDS.has(id)) {
-    /* Явно вимкнена група: показуємо лише якщо вже є хоч один активний пункт (рідко, але буває в JTL) */
+  if (id == null) return true;
+
+  if (DEFERRED_AFTER_UHR_GRUPPEN.has(id)) {
+    const uhrId = selectionItemIdForKonfigGruppe(
+      optionGroups,
+      selections,
+      UHR_WETTERSTATION_KONFIG_GRUPPE
+    );
+    if (uhrId != null) return true;
+  }
+
+  if (id === 476) {
+    const befId = selectionItemIdForKonfigGruppe(
+      optionGroups,
+      selections,
+      BEFESTIGUNG_KONFIG_GRUPPE
+    );
+    if (befId != null && MONTAGE_AKTIVIERT_476.has(befId)) return true;
+  }
+
+  if (DEFERRED_KONFIG_GRUPPE_IDS.has(id)) {
     if (group.bAktiv === false) {
       return group.oItem_arr?.some((i) => i.bAktiv) ?? false;
     }
-    /* true або undefined — показуємо (як раніше !== false) */
     return true;
   }
   return true;
@@ -332,6 +391,7 @@ export default function ConfigStep({
   const [singleOpenGroupIdx, setSingleOpenGroupIdx] = useState<number | null>(
     null
   );
+  const [optionInfoPopup, setOptionInfoPopup] = useState<number | null>(null);
   const singleDropdownRootRef = useRef<HTMLDivElement | null>(null);
   const lastSentSizeKeyRef = useRef<string | null>(null);
 
@@ -389,6 +449,20 @@ export default function ConfigStep({
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, []);
+
+  /* Після buildConfiguration / load_konfig — одразу закрити відкритий dropdown і дати браузеру оновити список до paint. */
+  useLayoutEffect(() => {
+    setSingleOpenGroupIdx(null);
+  }, [configGroups]);
+
+  useEffect(() => {
+    if (optionInfoPopup == null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOptionInfoPopup(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [optionInfoPopup]);
 
   // Пропускаємо першу групу "Spiegelmaß" (розміри), бо її вже конфігуруємо в Step 1
   const optionGroups = useMemo(
@@ -532,7 +606,61 @@ export default function ConfigStep({
     return undefined;
   };
 
-  /** Як у браузері: item[kKonfiggruppe] = { "0": kKonfigitem } для розміру + обраних опцій */
+  /**
+   * Як на оригінальному JTL: у `item` мають бути усі релевантні групи.
+   * Важливо: після кліку в «Uhr / Wetterstation» (kKonfiggruppe 11) JTL часто ще тримає group.bAktiv === false,
+   * поки не отримає вибір у buildConfiguration. Раніше ми відсіювали таку групу до читання nextSelections —
+   * через це в payload не з’являлось "11":{"0":"2150"} і залежні селекти не вмикались.
+   */
+  const buildItemSlotForKonfigGroup = (
+    group: RawConfigGroup,
+    groupIndex: number,
+    nextSelections: GroupSelection[]
+  ): Record<string, string> | null => {
+    if (group.kKonfiggruppe == null) return null;
+
+    const sel =
+      nextSelections.find((s) => s.groupIndex === groupIndex)?.selectedItemIds ??
+      [];
+
+    const existsInGroup = (id: number) =>
+      id > 0 && group.oItem_arr.some((i) => i.kKonfigitem === id);
+
+    const activeFromApi = group.oItem_arr.filter((i) => i.bAktiv);
+
+    if (group.nMax === 1) {
+      const s0 = sel[0];
+      if (s0 != null && existsInGroup(s0)) {
+        return { "0": String(s0) };
+      }
+      if (group.bAktiv === false) return null;
+      let id: number | null = null;
+      if (activeFromApi.length > 0) id = activeFromApi[0].kKonfigitem;
+      else if (group.nMin > 0 && group.oItem_arr[0])
+        id = group.oItem_arr[0].kKonfigitem;
+      if (id == null || id <= 0) return null;
+      return { "0": String(id) };
+    }
+
+    const picked = sel.filter(existsInGroup);
+    if (picked.length > 0) {
+      const out: Record<string, string> = {};
+      picked.forEach((kid, j) => {
+        out[String(j)] = String(kid);
+      });
+      return out;
+    }
+    if (group.bAktiv === false) return null;
+    const ids = activeFromApi.map((i) => i.kKonfigitem);
+    if (ids.length === 0) return null;
+    const out: Record<string, string> = {};
+    ids.forEach((kid, j) => {
+      out[String(j)] = String(kid);
+    });
+    return out;
+  };
+
+  /** Як у браузері: item[kKonfiggruppe] = { "0": kKonfigitem, … } для розміру + усіх активних опцій */
   const buildConfigurationItemMap = (
     groups: RawConfigGroup[],
     opt: RawConfigGroup[],
@@ -540,7 +668,7 @@ export default function ConfigStep({
   ) => {
     const { customSizeConfigItem, customSizeConfigGroup } =
       deriveEffectiveSizeContext(groups);
-    const item: Record<string, { "0": string }> = {};
+    const item: Record<string, Record<string, string>> = {};
     if (customSizeConfigGroup && customSizeConfigItem) {
       item[String(customSizeConfigGroup)] = {
         "0": String(customSizeConfigItem),
@@ -550,11 +678,8 @@ export default function ConfigStep({
       const g = opt[i];
       const kg = g.kKonfiggruppe;
       if (kg == null) continue;
-      const first = nextSelections.find((s) => s.groupIndex === i)
-        ?.selectedItemIds?.[0];
-      if (first != null && first > 0) {
-        item[String(kg)] = { "0": String(first) };
-      }
+      const slot = buildItemSlotForKonfigGroup(g, i, nextSelections);
+      if (slot) item[String(kg)] = slot;
     }
     return item;
   };
@@ -612,11 +737,8 @@ export default function ConfigStep({
 
     const items = [
       ...opt.map((group, idx) => {
-        const selected = nextSelections.find((s) => s.groupIndex === idx)
-          ?.selectedItemIds?.[0];
-        if (selected) return String(selected);
-        if (group.bAktiv === false) return "";
-        return "";
+        const slot = buildItemSlotForKonfigGroup(group, idx, nextSelections);
+        return slot?.["0"] ?? "";
       }),
       String(customSizeConfigItem),
     ];
@@ -837,8 +959,8 @@ export default function ConfigStep({
     <section className="config-step-2 config-jtl-compact">
       <div className="config-section">
         {optionGroups.map((group, idx) => {
-          /* Як оригінал: ~16 основних рядків; відкладені групи лише коли bAktiv з бекенда. items[] для load_konfig лишається повним. */
-          if (!shouldShowConfigGroupRow(group)) return null;
+          if (!shouldShowConfigGroupRow(group, optionGroups, selections))
+            return null;
           if (!group.oItem_arr?.length) return null;
 
           const selection = selections.find((s) => s.groupIndex === idx);
@@ -847,21 +969,35 @@ export default function ConfigStep({
           const groupTitle = plainLabelFromApi(
             group.oSprache?.cName ?? group.cKommentar ?? ""
           );
-          const rowKey = `${idx}-${group.kKonfiggruppe ?? "g"}`;
+          const aktivSig = group.oItem_arr
+            .filter((i) => i.bAktiv)
+            .map((i) => i.kKonfigitem)
+            .join("-");
+          const rowKey = `${idx}-${group.kKonfiggruppe ?? "g"}-${aktivSig || "na"}`;
 
-          const descTooltip =
-            plainLabelFromApi(group.oSprache?.cBeschreibung) || undefined;
+          const kg = group.kKonfiggruppe;
 
           return (
             <div className="dimension-group jtl-config-group" key={rowKey}>
               <div className="dimension-header jtl-config-header-label-only">
-                <span
-                  className="info-icon"
-                  aria-hidden="true"
-                  title={descTooltip}
-                >
-                  i
-                </span>
+                {kg != null ? (
+                  <button
+                    type="button"
+                    className="info-icon jtl-option-info-trigger"
+                    aria-label={
+                      groupTitle
+                        ? `Infoseite: ${groupTitle}`
+                        : "Infoseite zur Option"
+                    }
+                    aria-haspopup="dialog"
+                    onClick={() => {
+                      setSingleOpenGroupIdx(null);
+                      setOptionInfoPopup(kg);
+                    }}
+                  >
+                    i
+                  </button>
+                ) : null}
                 <span className="dimension-label jtl-config-field-label">
                   {groupTitle || "Option"}
                 </span>
@@ -1009,6 +1145,43 @@ export default function ConfigStep({
           );
         })}
       </div>
+      {typeof document !== "undefined" &&
+        optionInfoPopup != null &&
+        createPortal(
+          <div
+            className="jtl-option-html-backdrop"
+            role="presentation"
+            onClick={() => setOptionInfoPopup(null)}
+          >
+            <div
+              className="jtl-option-html-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Option — Information"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="jtl-option-html-toolbar">
+                <button
+                  type="button"
+                  className="jtl-option-html-close"
+                  aria-label="Schließen"
+                  onClick={() => setOptionInfoPopup(null)}
+                >
+                  ×
+                </button>
+              </div>
+              <div className="jtl-option-html-frame-wrap">
+                <iframe
+                  className="jtl-option-html-frame"
+                  title="Option — Information"
+                  src={buildOptionInfoFrameSrc(optionInfoPopup)}
+                  sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+                />
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </section>
   );
 }

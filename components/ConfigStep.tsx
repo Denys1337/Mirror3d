@@ -118,6 +118,13 @@ type Props = {
   onSummChange?: (summ: number) => void;
   widthMm?: number;
   heightMm?: number;
+  activeStep?: number;
+};
+
+type StepGroupMap = {
+  2: Set<number>;
+  3: Set<number>;
+  4: Set<number>;
 };
 
 /** JTL liefert oft HTML-Entities (&szlig;, &auml;) — für UI wie Original ohne Rohtext */
@@ -173,6 +180,10 @@ const JTL_IMAGE_BASE = "https://test.schreiber-design.com/";
 /** Той самий HTML, що на JTL, але через наш API — інакше X-Frame-Options: sameorigin блокує iframe. */
 function buildOptionInfoFrameSrc(kKonfiggruppe: number): string {
   return `/api/jtl-option-html/${kKonfiggruppe}`;
+}
+
+function buildJtlAssetProxyUrl(rawUrl: string): string {
+  return `/api/jtl-asset?url=${encodeURIComponent(rawUrl)}`;
 }
 
 function buildImageUrl(path: string | null | undefined): string | null {
@@ -232,6 +243,16 @@ const DEFERRED_KONFIG_GRUPPE_IDS = new Set<number>([
 
 const UHR_WETTERSTATION_KONFIG_GRUPPE = 11;
 const BEFESTIGUNG_KONFIG_GRUPPE = 288;
+const LICHTFARBE_KONFIG_GRUPPE = 261;
+const SCHALTER_DIMMER_KONFIG_GRUPPE = 27;
+const SCHALTER_DIMMER_CCT_KONFIG_GRUPPE = 509;
+
+const LICHTFARBE_AKTIVIERT_27 = new Set<number>([2374, 1216, 1215]);
+const LICHTFARBE_AKTIVIERT_509 = new Set<number>([2566]);
+const SCHALTER27_AKTIVIERT_493 = new Set<number>([2319]);
+const SCHALTER509_AKTIVIERT_493 = new Set<number>([2559, 2560, 2567]);
+const SCHALTER27_AKTIVIERT_431 = new Set<number>([275, 1972, 1960, 1224]);
+const SCHALTER509_AKTIVIERT_432 = new Set<number>([2557, 2558]);
 
 /** Після вибору в «Uhr / Wetterstation» з’являються Position der Anzeige (428) та Anschluss (396). */
 const DEFERRED_AFTER_UHR_GRUPPEN = new Set<number>([428, 396]);
@@ -282,6 +303,63 @@ function shouldShowConfigGroupRow(
       BEFESTIGUNG_KONFIG_GRUPPE
     );
     if (befId != null && MONTAGE_AKTIVIERT_476.has(befId)) return true;
+  }
+
+  if (id === SCHALTER_DIMMER_KONFIG_GRUPPE) {
+    const lichtfarbeId = selectionItemIdForKonfigGruppe(
+      optionGroups,
+      selections,
+      LICHTFARBE_KONFIG_GRUPPE
+    );
+    if (lichtfarbeId != null && LICHTFARBE_AKTIVIERT_27.has(lichtfarbeId))
+      return true;
+  }
+
+  if (id === SCHALTER_DIMMER_CCT_KONFIG_GRUPPE) {
+    const lichtfarbeId = selectionItemIdForKonfigGruppe(
+      optionGroups,
+      selections,
+      LICHTFARBE_KONFIG_GRUPPE
+    );
+    if (lichtfarbeId != null && LICHTFARBE_AKTIVIERT_509.has(lichtfarbeId))
+      return true;
+  }
+
+  if (id === 493) {
+    const s27 = selectionItemIdForKonfigGruppe(
+      optionGroups,
+      selections,
+      SCHALTER_DIMMER_KONFIG_GRUPPE
+    );
+    const s509 = selectionItemIdForKonfigGruppe(
+      optionGroups,
+      selections,
+      SCHALTER_DIMMER_CCT_KONFIG_GRUPPE
+    );
+    if (
+      (s27 != null && SCHALTER27_AKTIVIERT_493.has(s27)) ||
+      (s509 != null && SCHALTER509_AKTIVIERT_493.has(s509))
+    ) {
+      return true;
+    }
+  }
+
+  if (id === 431) {
+    const s27 = selectionItemIdForKonfigGruppe(
+      optionGroups,
+      selections,
+      SCHALTER_DIMMER_KONFIG_GRUPPE
+    );
+    if (s27 != null && SCHALTER27_AKTIVIERT_431.has(s27)) return true;
+  }
+
+  if (id === 432) {
+    const s509 = selectionItemIdForKonfigGruppe(
+      optionGroups,
+      selections,
+      SCHALTER_DIMMER_CCT_KONFIG_GRUPPE
+    );
+    if (s509 != null && SCHALTER509_AKTIVIERT_432.has(s509)) return true;
   }
 
   if (DEFERRED_KONFIG_GRUPPE_IDS.has(id)) {
@@ -384,15 +462,23 @@ export default function ConfigStep({
   onSummChange,
   widthMm: widthMmFromStep1,
   heightMm: heightMmFromStep1,
+  activeStep = 2,
 }: Props) {
   const [configGroups, setConfigGroups] = useState<RawConfigGroup[]>([]);
+  const [stepGroupMap, setStepGroupMap] = useState<StepGroupMap | null>(null);
   const [jtlToken, setJtlToken] = useState<string | null>(null);
   const [configApiWarning, setConfigApiWarning] = useState<string | null>(null);
   const [singleOpenGroupIdx, setSingleOpenGroupIdx] = useState<number | null>(
     null
   );
   const [optionInfoPopup, setOptionInfoPopup] = useState<number | null>(null);
+  const [optionInfoHtml, setOptionInfoHtml] = useState<string>("");
+  const [optionInfoLoading, setOptionInfoLoading] = useState(false);
+  const [optionInfoImagePopup, setOptionInfoImagePopup] = useState<string | null>(
+    null
+  );
   const singleDropdownRootRef = useRef<HTMLDivElement | null>(null);
+  const optionInfoInlineRootRef = useRef<HTMLDivElement | null>(null);
   const lastSentSizeKeyRef = useRef<string | null>(null);
 
   // Витягуємо response.oKonfig_arr через API, щоб не імпортувати великий JSON напряму
@@ -464,6 +550,102 @@ export default function ConfigStep({
     return () => window.removeEventListener("keydown", onKey);
   }, [optionInfoPopup]);
 
+  useEffect(() => {
+    if (optionInfoPopup == null) return;
+    const popupId = optionInfoPopup;
+    let cancelled = false;
+    async function loadOptionInfoHtml() {
+      setOptionInfoLoading(true);
+      try {
+        const res = await fetch(
+          `${buildOptionInfoFrameSrc(popupId)}?fragment=1`,
+          { cache: "no-store" }
+        );
+        const html = await res.text();
+        if (!cancelled) {
+          setOptionInfoHtml(html);
+        }
+      } catch {
+        if (!cancelled) {
+          setOptionInfoHtml(
+            "<div style='padding:16px;font-family:Arial,sans-serif'>Fehler beim Laden der Information.</div>"
+          );
+        }
+      } finally {
+        if (!cancelled) setOptionInfoLoading(false);
+      }
+    }
+    void loadOptionInfoHtml();
+    return () => {
+      cancelled = true;
+    };
+  }, [optionInfoPopup]);
+
+  useEffect(() => {
+    const root = optionInfoInlineRootRef.current;
+    if (!root || optionInfoPopup == null) return;
+
+    const toAbs = (raw: string | null | undefined): string | null => {
+      const v = raw?.trim() ?? "";
+      if (!v || v === "#") return null;
+      try {
+        return new URL(v, JTL_IMAGE_BASE).toString();
+      } catch {
+        return v;
+      }
+    };
+
+    const resolveImageAbove = (iconEl: Element): string | null => {
+      // На оригіналі іконка живе всередині <a data-featherlight="/bilder/...">
+      const anchor = iconEl.closest("a");
+      if (anchor) {
+        const byFeatherlight = toAbs(anchor.getAttribute("data-featherlight"));
+        if (byFeatherlight) return byFeatherlight;
+        const byHref = toAbs(anchor.getAttribute("href"));
+        if (byHref) return byHref;
+        const byImgInAnchor = toAbs(
+          anchor.querySelector("img")?.getAttribute("src") ?? null
+        );
+        if (byImgInAnchor) return byImgInAnchor;
+      }
+
+      // Fallback: найближча попередня картинка в загальному контейнері
+      const imgs = Array.from(root.querySelectorAll("img"));
+      let candidate: HTMLImageElement | null = null;
+      for (const img of imgs) {
+        if (!(img instanceof HTMLImageElement)) continue;
+        if (
+          !!(img.compareDocumentPosition(iconEl) & Node.DOCUMENT_POSITION_FOLLOWING)
+        ) {
+          if (!candidate) candidate = img;
+          else if (
+            !!(
+              candidate.compareDocumentPosition(img) &
+              Node.DOCUMENT_POSITION_FOLLOWING
+            )
+          ) {
+            candidate = img;
+          }
+        }
+      }
+      return toAbs(candidate?.getAttribute("src"));
+    };
+
+    const onClick = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (!t) return;
+      const icon = t.closest(".fa.fa-search");
+      if (!icon) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const img = resolveImageAbove(icon);
+      if (img) setOptionInfoImagePopup(buildJtlAssetProxyUrl(img));
+    };
+
+    root.addEventListener("click", onClick);
+    return () => root.removeEventListener("click", onClick);
+  }, [optionInfoPopup, optionInfoHtml]);
+
   // Пропускаємо першу групу "Spiegelmaß" (розміри), бо її вже конфігуруємо в Step 1
   const optionGroups = useMemo(
     () =>
@@ -471,7 +653,54 @@ export default function ConfigStep({
     [configGroups]
   );
 
+  // Карта груп по степах з gk_json.php (ігноруємо step 1).
+  useEffect(() => {
+    let cancelled = false;
+    async function loadStepMap() {
+      try {
+        const res = await fetch("/api/jtl-group-steps", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as Record<string, unknown>;
+        const toSet = (v: unknown): Set<number> =>
+          new Set(
+            Array.isArray(v)
+              ? v
+                  .map((x) => Number(x))
+                  .filter((n) => Number.isFinite(n) && n > 0)
+              : []
+          );
+        const map: StepGroupMap = {
+          2: toSet(data["2"]),
+          3: toSet(data["3"]),
+          4: toSet(data["4"]),
+        };
+        if (!cancelled) setStepGroupMap(map);
+      } catch {
+        // ignore: fallback без мапи — показувати всі групи на step 2
+      }
+    }
+    void loadStepMap();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const [selections, setSelections] = useState<GroupSelection[]>([]);
+
+  const visibleGroupIndices = useMemo(() => {
+    // Поки мапа не завантажилась — не ламаємо UX: на кроках 2..4 показуємо всі групи.
+    if (!stepGroupMap) {
+      return activeStep >= 2 && activeStep <= 4
+        ? optionGroups.map((_, idx) => idx)
+        : [];
+    }
+    if (activeStep !== 2 && activeStep !== 3 && activeStep !== 4) return [];
+    const ids = stepGroupMap[activeStep];
+    return optionGroups
+      .map((g, idx) => ({ idx, kg: g.kKonfiggruppe }))
+      .filter((x) => x.kg != null && ids.has(x.kg))
+      .map((x) => x.idx);
+  }, [activeStep, optionGroups, stepGroupMap]);
 
   const emitSummIfExists = (data: unknown) => {
     if (!onSummChange) return;
@@ -958,7 +1187,8 @@ export default function ConfigStep({
   return (
     <section className="config-step-2 config-jtl-compact">
       <div className="config-section">
-        {optionGroups.map((group, idx) => {
+        {visibleGroupIndices.map((idx) => {
+          const group = optionGroups[idx];
           if (!shouldShowConfigGroupRow(group, optionGroups, selections))
             return null;
           if (!group.oItem_arr?.length) return null;
@@ -1171,13 +1401,48 @@ export default function ConfigStep({
                 </button>
               </div>
               <div className="jtl-option-html-frame-wrap">
-                <iframe
-                  className="jtl-option-html-frame"
-                  title="Option — Information"
-                  src={buildOptionInfoFrameSrc(optionInfoPopup)}
-                  sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-                />
+                {optionInfoLoading ? (
+                  <div className="jtl-option-html-loading">Loading...</div>
+                ) : (
+                  <div
+                    ref={optionInfoInlineRootRef}
+                    className="jtl-option-html-inline"
+                    dangerouslySetInnerHTML={{ __html: optionInfoHtml }}
+                  />
+                )}
               </div>
+            </div>
+          </div>,
+          document.body
+        )}
+      {typeof document !== "undefined" &&
+        optionInfoImagePopup &&
+        createPortal(
+          <div
+            className="jtl-option-image-backdrop"
+            role="presentation"
+            onClick={() => setOptionInfoImagePopup(null)}
+          >
+            <div
+              className="jtl-option-image-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Bildvorschau"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="jtl-option-image-close"
+                aria-label="Schließen"
+                onClick={() => setOptionInfoImagePopup(null)}
+              >
+                ×
+              </button>
+              <img
+                className="jtl-option-image-preview"
+                src={optionInfoImagePopup}
+                alt=""
+              />
             </div>
           </div>,
           document.body

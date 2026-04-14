@@ -1227,21 +1227,83 @@ main.app-root {
   min-width: 0;
   width: 100%;
   max-width: 100%;
-  overflow: hidden;
+  overflow: auto;
   position: relative;
   box-sizing: border-box;
+  padding: 12px 14px;
+  background: #fff;
 }
 
-.jtl-option-html-frame {
-  position: absolute;
-  inset: 0;
+.jtl-option-html-inline {
   width: 100%;
-  height: 100%;
   max-width: 100%;
-  border: none;
   background: #ffffff;
   display: block;
   box-sizing: border-box;
+}
+
+.jtl-option-html-loading {
+  padding: 16px;
+  color: rgba(71, 85, 105, 1);
+  font-size: 14px;
+}
+
+.jtl-option-html-inline .fa.fa-search {
+  cursor: zoom-in;
+}
+
+.jtl-option-html-inline .fa.fa-search,
+.jtl-option-html-inline .fa-search,
+.jtl-option-html-inline i.fa.fa-search.fa-2x {
+  display: none !important;
+}
+
+.jtl-option-image-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10100;
+  background: rgba(2, 6, 23, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  box-sizing: border-box;
+}
+
+.jtl-option-image-dialog {
+  position: relative;
+  width: min(980px, calc(100vw - 36px));
+  max-height: calc(100vh - 36px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.jtl-option-image-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.82);
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.jtl-option-image-preview {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 60px);
+  width: auto;
+  height: auto;
 }
 
 .controls-panel .config-jtl-compact .jtl-config-field-label {

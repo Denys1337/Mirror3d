@@ -123,7 +123,7 @@ function HomePageContent() {
     if (typeof window === "undefined") return;
     const raw = window.sessionStorage.getItem("mirror3d-active-step");
     const parsed = Number(raw);
-    if (parsed >= 1 && parsed <= 3) {
+    if (parsed >= 1 && parsed <= 5) {
       setActiveStep(parsed);
     }
     setStepRestored(true);
@@ -239,23 +239,27 @@ function HomePageContent() {
             <span className="step-label">Beleuchtung</span>
           </div>
           <div className="step-connector"></div>
-          <div className="step-item">
+          <div
+            className={`step-item ${activeStep === 3 ? "active" : ""}`}
+            onClick={() => setActiveStep(3)}
+          >
             <div className="step-circle">3</div>
-            <span className="step-label">Schutz und Pflege</span>
+            <span className="step-label">Zubehör</span>
           </div>
           <div className="step-connector"></div>
-          <div className="step-item">
+          <div
+            className={`step-item ${activeStep === 4 ? "active" : ""}`}
+            onClick={() => setActiveStep(4)}
+          >
             <div className="step-circle">4</div>
-            <span className="step-label">Komfort</span>
-          </div>
-          <div className="step-connector"></div>
-          <div className="step-item">
-            <div className="step-circle">5</div>
             <span className="step-label">Montage</span>
           </div>
           <div className="step-connector"></div>
-          <div className="step-item">
-            <div className="step-circle">6</div>
+          <div
+            className={`step-item ${activeStep === 5 ? "active" : ""}`}
+            onClick={() => setActiveStep(5)}
+          >
+            <div className="step-circle">5</div>
             <span className="step-label">Zusammenfassung</span>
           </div>
         </div>
@@ -595,7 +599,15 @@ function HomePageContent() {
       <div className="controls-panel">
         <div className="panel-header">
           <h2 className="panel-title">
-            {activeStep === 1 ? "Maße" : activeStep === 2 ? "Beleuchtung" : "Maße"}
+            {activeStep === 1
+              ? "Maße"
+              : activeStep === 2
+                ? "Beleuchtung"
+                : activeStep === 3
+                  ? "Zubehör"
+                  : activeStep === 4
+                    ? "Montage"
+                    : "Zusammenfassung"}
           </h2>
           <p className="panel-step">SCHRITT {activeStep}</p>
         </div>
@@ -922,13 +934,14 @@ function HomePageContent() {
         )}
 
         <div
-          style={{ display: activeStep === 2 ? "block" : "none" }}
-          aria-hidden={activeStep !== 2}
+          style={{ display: activeStep >= 2 && activeStep <= 4 ? "block" : "none" }}
+          aria-hidden={!(activeStep >= 2 && activeStep <= 4)}
         >
           <ConfigStep
             widthMm={committedWidthMm}
             heightMm={committedHeightMm}
             onSummChange={setJtlSumm}
+            activeStep={activeStep}
           />
         </div>
 
@@ -957,9 +970,9 @@ function HomePageContent() {
           <button
             className="primary-cta-button"
             type="button"
-            onClick={() => setActiveStep(2)}
+            onClick={() => setActiveStep((prev) => Math.min(5, prev + 1))}
           >
-            Weiter zu Beleuchtung
+            Weiter
             <span className="primary-cta-arrow">
               <img src="/images/arrowButton.svg" alt="" />
             </span>

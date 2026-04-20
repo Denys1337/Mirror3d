@@ -110,7 +110,7 @@ function HomePageContent() {
   const [showSchminkspiegel, setShowSchminkspiegel] = useState(false);
   const [schminkspiegelCorner, setSchminkspiegelCorner] = useState<"top-left" | "top-center" | "top-right" | "right-center" | "bottom-right" | "bottom-center" | "bottom-left" | "left-center" | null>(null);
   const [cameraView, setCameraView] = useState<"top" | "left" | "right" | "front" | undefined>(undefined);
-  const [activeToolButton, setActiveToolButton] = useState<"wall" | "light" | "ruler" | "cube" | null>(null);
+  const [activeToolButton, setActiveToolButton] = useState<"wall" | "light" | "ruler" | "cube" | null>("ruler");
   const [lightingMode, setLightingMode] = useState<"none" | "sides" | "frame" | "top-sides">("none");
   const [showShelf, setShowShelf] = useState(false);
   const [shelfLengthMm, setShelfLengthMm] = useState(800);
@@ -336,22 +336,6 @@ function HomePageContent() {
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <rect x="3" y="8" width="18" height="8" rx="1" stroke="currentColor" strokeWidth="2"/>
                 <path d="M6 8v-2M6 16v2M9 8v-2M9 16v2M12 8v-2M12 16v2M15 8v-2M15 16v2M18 8v-2M18 16v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-              </svg>
-            </button>
-            <button
-              className={`tool-button ${activeToolButton === "cube" ? "active" : ""}`}
-              onClick={() => {
-                const newActive = activeToolButton === "cube" ? null : "cube";
-                setActiveToolButton(newActive);
-              }}
-              aria-label="3D Ansicht"
-            >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M2 17l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M12 2v20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                <path d="M2 7v10M22 7v10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
               </svg>
             </button>
           </div>

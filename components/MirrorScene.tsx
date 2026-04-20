@@ -1,7 +1,7 @@
 "use client";
 
 import { Canvas, useThree, useFrame, ThreeEvent } from "@react-three/fiber";
-import { OrbitControls, MeshReflectorMaterial, Environment, useTexture, RoundedBox, useGLTF, Html } from "@react-three/drei";
+import { OrbitControls, MeshReflectorMaterial, Environment, useTexture, RoundedBox, useGLTF, Text } from "@react-three/drei";
 import { Color } from "three";
 import { useRef, useState, useMemo, useEffect } from "react";
 import * as THREE from "three";
@@ -990,8 +990,7 @@ function MirrorDimensions({
   // Лівий край зеркала: -mirrorWidth / 2
   const topLabelY = mirrorHeight / 2 + labelOffsetFromMount;
   const topLineY = mirrorHeight / 2 + lineOffsetFromMount;
-  const leftLabelX = -mirrorWidth / 2 - labelOffsetFromMount;
-  const leftLineX = -mirrorWidth / 2 - lineOffsetFromMount;
+  const rightLineX = mirrorWidth / 2 + lineOffsetFromMount;
   
   // Debug: виводимо значення для перевірки
   console.log('MirrorDimensions:', {
@@ -1001,8 +1000,7 @@ function MirrorDimensions({
     mountHeight,
     topLabelY,
     topLineY,
-    leftLabelX,
-    leftLineX,
+    rightLineX,
     labelOffsetFromMount,
     lineOffsetFromMount
   });
@@ -1088,69 +1086,103 @@ function MirrorDimensions({
   
   return (
     <group>
-      {/* Верхня лінія - 15см від верхнього краю монтажного блоку */}
+      {/* Верхній індикатор ширини: тонка сіра лінія + штрихи на краях */}
       <mesh position={[0, topLineY, -mountDepth + 0.21]}>
-        <planeGeometry args={[mirrorWidth, 0.02]} />
-        <meshBasicMaterial map={lineTexture} opacity={1} transparent={false} />
+        <planeGeometry args={[mirrorWidth, 0.007]} />
+        <meshBasicMaterial color="#333333" />
+      </mesh>
+      <mesh position={[-mirrorWidth / 2, topLineY, -mountDepth + 0.21]}>
+        <planeGeometry args={[0.004, 0.03]} />
+        <meshBasicMaterial color="#333333" />
+      </mesh>
+      <mesh position={[-mirrorWidth / 2 - 0, topLineY, -mountDepth + 0.21]}>
+        <planeGeometry args={[0.008, 0.004]} />
+        <meshBasicMaterial color="#333333" />
+      </mesh>
+      <mesh position={[mirrorWidth / 2, topLineY, -mountDepth + 0.21]}>
+        <planeGeometry args={[0.004, 0.03]} />
+        <meshBasicMaterial color="#333333" />
+      </mesh>
+      <mesh position={[mirrorWidth / 2 + 0, topLineY, -mountDepth + 0.21]}>
+        <planeGeometry args={[0.008, 0.004]} />
+        <meshBasicMaterial color="#333333" />
       </mesh>
       
-      {/* Верхня мітка з розміром - 20см від верхнього краю монтажного блоку */}
-      <Html
-        position={[0, topLabelY, -mountDepth + 0.21]}
-        center
-        transform
-        occlude={false}
-        style={{ pointerEvents: 'none' }}
-      >
-        <div style={{
-          background: 'rgba(245, 158, 11, 1)',
-          color: '#ffffff',
-          padding: '4px 4px',
-          borderRadius: '6px',
-          fontSize: '6px',
-          fontWeight: 600,
-          whiteSpace: 'nowrap',
-          boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
-          transform: 'translateX(-50%)'
-        }}>
-          {widthMm}mm
-        </div>
-      </Html>
+      {/* Верхня мітка розміру: чистий 3D-об'єкт, приклеєний до стіни */}
+      <group position={[0, topLineY, -mountDepth + 0.211]}>
+        <mesh position={[0, 0, 0]}>
+          <planeGeometry args={[0.24, 0.095]} />
+          <meshBasicMaterial color="#e5e7eb" side={THREE.DoubleSide} />
+        </mesh>
+        <mesh position={[0, 0, 0.0002]}>
+          <planeGeometry args={[0.234, 0.089]} />
+          <meshBasicMaterial
+            color="#ffffff"
+            opacity={0.95}
+            transparent
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+        <Text
+          position={[0, 0, 0.0004]}
+          fontSize={0.025}
+          color="#333333"
+          fontWeight={600}
+          anchorX="center"
+          anchorY="middle"
+        >
+          {`${widthMm} mm`}
+        </Text>
+      </group>
       
-      {/* Ліва лінія - 15см від лівого краю монтажного блоку */}
-      <mesh position={[leftLineX, 0, -mountDepth + 0.21]} rotation={[0, 0, Math.PI / 2]}>
-        <planeGeometry args={[mirrorHeight, 0.02]} />
-        <meshBasicMaterial 
-          map={lineTexture} 
-          opacity={1} 
-          transparent={false}
-          side={THREE.DoubleSide}
-        />
+      {/* Правий індикатор висоти: така сама стилістика, як у верхнього */}
+      <mesh position={[rightLineX, 0, -mountDepth + 0.21]} rotation={[0, 0, Math.PI / 2]}>
+        <planeGeometry args={[mirrorHeight, 0.007]} />
+        <meshBasicMaterial color="#333333" side={THREE.DoubleSide} />
       </mesh>
-      
-      {/* Ліва мітка з розміром - 20см від лівого краю монтажного блоку */}
-      <Html
-        position={[leftLabelX, 0, -mountDepth + 0.21]}
-        center
-        transform
-        occlude={false}
-        style={{ pointerEvents: 'none' }}
-      >
-        <div style={{
-          background: 'rgba(245, 158, 11, 1)',
-          color: '#ffffff',
-          padding: '4px 4px',
-          borderRadius: '6px',
-          fontSize: '6px',
-          fontWeight: 600,
-          whiteSpace: 'nowrap',
-          boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
-          transform: 'translateY(-50%) rotate(-90deg)',
-          transformOrigin: 'center'
-        }}>
-          {heightMm}mm
-        </div>
-      </Html>
+      <mesh position={[rightLineX, mirrorHeight / 2, -mountDepth + 0.21]}>
+        <planeGeometry args={[0.03, 0.004]} />
+        <meshBasicMaterial color="#333333" side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[rightLineX, mirrorHeight / 2, -mountDepth + 0.21]}>
+        <planeGeometry args={[0.004, 0.008]} />
+        <meshBasicMaterial color="#333333" side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[rightLineX, -mirrorHeight / 2, -mountDepth + 0.21]}>
+        <planeGeometry args={[0.03, 0.004]} />
+        <meshBasicMaterial color="#333333" side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[rightLineX, -mirrorHeight / 2, -mountDepth + 0.21]}>
+        <planeGeometry args={[0.004, 0.008]} />
+        <meshBasicMaterial color="#333333" side={THREE.DoubleSide} />
+      </mesh>
+
+      <group position={[rightLineX, 0, -mountDepth + 0.211]} rotation={[0, 0, Math.PI / 2]}>
+        <mesh position={[0, 0, 0]}>
+          <planeGeometry args={[0.24, 0.095]} />
+          <meshBasicMaterial color="#e5e7eb" side={THREE.DoubleSide} />
+        </mesh>
+        <mesh position={[0, 0, 0.0002]}>
+          <planeGeometry args={[0.234, 0.089]} />
+          <meshBasicMaterial
+            color="#ffffff"
+            opacity={0.95}
+            transparent
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+        <Text
+          position={[0, 0, 0.0004]}
+          fontSize={0.025}
+          color="#333333"
+          fontWeight={600}
+          anchorX="center"
+          anchorY="middle"
+          rotation={[0, 0, Math.PI]}
+        >
+          {`${heightMm} mm`}
+        </Text>
+      </group>
     </group>
   );
 }

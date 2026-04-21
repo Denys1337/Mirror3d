@@ -100,7 +100,7 @@ function HomePageContent() {
   const [inputWidthMm, setInputWidthMm] = useState("900");
   const [inputHeightMm, setInputHeightMm] = useState("1600");
   const [showWall, setShowWall] = useState(true);
-  const [showLight, setShowLight] = useState(false);
+  const [showLight, setShowLight] = useState(true);
   const [showClock, setShowClock] = useState(false);
   const [clockCorner, setClockCorner] = useState<"top-left" | "top-center" | "top-right" | "right-center" | "bottom-right" | "bottom-center" | "bottom-left" | "left-center" | null>(null);
   const [showSocket, setShowSocket] = useState(false);
@@ -110,7 +110,9 @@ function HomePageContent() {
   const [showSchminkspiegel, setShowSchminkspiegel] = useState(false);
   const [schminkspiegelCorner, setSchminkspiegelCorner] = useState<"top-left" | "top-center" | "top-right" | "right-center" | "bottom-right" | "bottom-center" | "bottom-left" | "left-center" | null>(null);
   const [cameraView, setCameraView] = useState<"top" | "left" | "right" | "front" | undefined>(undefined);
-  const [activeToolButton, setActiveToolButton] = useState<"wall" | "light" | "ruler" | "cube" | null>("ruler");
+  const [wallToolActive, setWallToolActive] = useState(true);
+  const [lightToolActive, setLightToolActive] = useState(true);
+  const [rulerToolActive, setRulerToolActive] = useState(true);
   const [lightingMode, setLightingMode] = useState<"none" | "sides" | "frame" | "top-sides">("none");
   const [showShelf, setShowShelf] = useState(false);
   const [shelfLengthMm, setShelfLengthMm] = useState(800);
@@ -270,8 +272,8 @@ function HomePageContent() {
           <MirrorScene
             widthMm={widthMm}
             heightMm={heightMm}
-            showWall={activeToolButton === "wall" ? false : showWall}
-            showroomLight={showLight}
+            showWall={wallToolActive}
+            showroomLight={lightToolActive && showLight}
             showClock={showClock}
             clockCorner={clockCorner}
             onClockCornerChange={setClockCorner}
@@ -285,114 +287,99 @@ function HomePageContent() {
             schminkspiegelCorner={schminkspiegelCorner}
             onSchminkspiegelCornerChange={setSchminkspiegelCorner}
             cameraView={cameraView}
-            showDimensions={activeToolButton === "ruler"}
+            showDimensions={rulerToolActive}
             lightingMode={lightingMode}
             showShelf={showShelf}
             shelfLengthMm={shelfLengthMm}
           />
-          <div className="dimension-badge">
-            <span>Breite: {widthMm} mm</span>
-            <span>Höhe: {heightMm} mm</span>
-          </div>
-          
           <div className="tool-controls">
             <button
-              className={`tool-button ${activeToolButton === "wall" ? "active" : ""}`}
+              className={`tool-button ${wallToolActive ? "active" : ""}`}
               onClick={() => {
-                const newActive = activeToolButton === "wall" ? null : "wall";
-                setActiveToolButton(newActive);
+                setWallToolActive((prev) => !prev);
               }}
               aria-label="Wand"
+              title={wallToolActive ? "Wand aus" : "Wand ein"}
             >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M1 12s4-4 11-4 11 4 11 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M1 12s4 4 11 4 11-4 11-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2"/>
-              </svg>
+              <img className="tool-button-icon" src="/images/wall.svg" alt="" aria-hidden="true" />
+              <span className="tool-button-tooltip">
+                {wallToolActive ? "Wand aus" : "Wand ein"}
+              </span>
             </button>
             <button
-              className={`tool-button ${activeToolButton === "light" ? "active" : ""}`}
+              className={`tool-button ${lightToolActive ? "active" : ""}`}
               onClick={() => {
-                const newActive = activeToolButton === "light" ? null : "light";
-                setActiveToolButton(newActive);
+                setLightToolActive((prev) => !prev);
                 setShowLight(!showLight);
               }}
               aria-label="Beleuchtung"
+              title={lightToolActive ? "Licht aus" : "Licht ein"}
             >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M9 21h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M12 3v1m0 16v1M5.64 5.64l.7.7m11.32 11.32l.7.7M3 12h1m16 0h1M5.64 18.36l.7-.7m11.32-11.32l.7-.7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" stroke="currentColor" strokeWidth="2"/>
-              </svg>
+              <img className="tool-button-icon" src="/images/light.svg" alt="" aria-hidden="true" />
+              <span className="tool-button-tooltip">
+                {lightToolActive ? "Licht aus" : "Licht ein"}
+              </span>
             </button>
             <button
-              className={`tool-button ${activeToolButton === "ruler" ? "active" : ""}`}
+              className={`tool-button ${rulerToolActive ? "active" : ""}`}
               onClick={() => {
-                const newActive = activeToolButton === "ruler" ? null : "ruler";
-                setActiveToolButton(newActive);
+                setRulerToolActive((prev) => !prev);
               }}
               aria-label="Lineal"
+              title={rulerToolActive ? "Bemarkungen ausblenden" : "Bemarkungen einblenden"}
             >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect x="3" y="8" width="18" height="8" rx="1" stroke="currentColor" strokeWidth="2"/>
-                <path d="M6 8v-2M6 16v2M9 8v-2M9 16v2M12 8v-2M12 16v2M15 8v-2M15 16v2M18 8v-2M18 16v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-              </svg>
+              <img className="tool-button-icon" src="/images/size.svg" alt="" aria-hidden="true" />
+              <span className="tool-button-tooltip">
+                {rulerToolActive ? "Bemarkungen ausblenden" : "Bemarkungen einblenden"}
+              </span>
             </button>
           </div>
-        </div>
-        <div className="camera-controls-panel">
-          <div className="camera-controls">
-            <div className="camera-controls-title">Kamera Ansicht</div>
-            <div className="camera-buttons">
+          <div className="camera-overlay-controls">
+            <div className="camera-overlay-title">
+              <span>KAMERA</span>
+              <span>ANSICHT</span>
+            </div>
+            <div className="camera-overlay-buttons">
               <button
-                className="camera-button"
+                className={`camera-overlay-button ${cameraView === "top" ? "active" : ""}`}
                 onClick={() => setCameraView("top")}
                 aria-label="Oben"
+                type="button"
               >
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M12 4L8 8L12 12L16 8L12 4Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-                  <path d="M12 4C12 4 6 10 6 10C6 10 6 16 6 16C6 16 12 22 12 22" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-                </svg>
+                <img className="camera-overlay-icon" src="/images/oben.svg" alt="" aria-hidden="true" />
                 <span>Oben</span>
               </button>
               <button
-                className="camera-button"
+                className={`camera-overlay-button ${cameraView === "left" ? "active" : ""}`}
                 onClick={() => setCameraView("left")}
                 aria-label="Links"
+                type="button"
               >
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M4 12L8 8L12 12L8 16L4 12Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-                  <path d="M4 12C4 12 10 6 10 6C10 6 16 6 16 6C16 6 22 12 22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-                </svg>
+                <img className="camera-overlay-icon" src="/images/links.svg" alt="" aria-hidden="true" />
                 <span>Links</span>
               </button>
               <button
-                className="camera-button"
+                className={`camera-overlay-button ${cameraView === "right" ? "active" : ""}`}
                 onClick={() => setCameraView("right")}
                 aria-label="Rechts"
+                type="button"
               >
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M20 12L16 8L12 12L16 16L20 12Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-                  <path d="M20 12C20 12 14 6 14 6C14 6 8 6 8 6C8 6 2 12 2 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-                </svg>
+                <img className="camera-overlay-icon" src="/images/Rechts.svg" alt="" aria-hidden="true" />
                 <span>Rechts</span>
               </button>
               <button
-                className="camera-button"
+                className={`camera-overlay-button ${cameraView === "front" ? "active" : ""}`}
                 onClick={() => setCameraView("front")}
                 aria-label="Vorne"
+                type="button"
               >
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <rect x="4" y="6" width="16" height="12" rx="2" stroke="currentColor" strokeWidth="2" fill="none"/>
-                  <path d="M4 8L6 8M4 10L5 10M20 8L18 8M20 10L19 10M4 16L6 16M4 14L5 14M20 16L18 16M20 14L19 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                  <circle cx="12" cy="12" r="2.5" stroke="currentColor" strokeWidth="1.5" fill="none"/>
-                </svg>
+                <img className="camera-overlay-icon" src="/images/Vorne.svg" alt="" aria-hidden="true" />
                 <span>Vorne</span>
               </button>
             </div>
           </div>
         </div>
-        <div className="lighting-select-panel">
+        {/* <div className="lighting-select-panel">
           <div className="lighting-select-title">Beleuchtung auf dem Spiegel</div>
           <select
             className="lighting-select"
@@ -577,7 +564,7 @@ function HomePageContent() {
               <option value="left-center">Links Mitte</option>
             </select>
           )}
-        </div>
+        </div> */}
       </div>
       
       <div className="controls-panel">

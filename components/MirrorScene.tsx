@@ -989,8 +989,8 @@ function MirrorDimensions({
   // Верхній край зеркала: mirrorHeight / 2
   // Лівий край зеркала: -mirrorWidth / 2
   const topLabelY = mirrorHeight / 2 + labelOffsetFromMount;
-  const topLineY = mirrorHeight / 2 + lineOffsetFromMount;
-  const rightLineX = mirrorWidth / 2 + lineOffsetFromMount;
+  const topLineY = mirrorHeight / 2 + lineOffsetFromMount + 0.08;
+  const rightLineX = mirrorWidth / 2 + lineOffsetFromMount + 0.08;
   
   // Debug: виводимо значення для перевірки
   console.log('MirrorDimensions:', {
@@ -1086,7 +1086,6 @@ function MirrorDimensions({
   
   return (
     <group>
-      {/* Верхній індикатор ширини: тонка сіра лінія + штрихи на краях */}
       <mesh position={[0, topLineY, -mountDepth + 0.21]}>
         <planeGeometry args={[mirrorWidth, 0.007]} />
         <meshBasicMaterial color="#333333" />
@@ -1108,14 +1107,13 @@ function MirrorDimensions({
         <meshBasicMaterial color="#333333" />
       </mesh>
       
-      {/* Верхня мітка розміру: чистий 3D-об'єкт, приклеєний до стіни */}
       <group position={[0, topLineY, -mountDepth + 0.211]}>
         <mesh position={[0, 0, 0]}>
-          <planeGeometry args={[0.24, 0.095]} />
+          <planeGeometry args={[0.48, 0.19]} />
           <meshBasicMaterial color="#e5e7eb" side={THREE.DoubleSide} />
         </mesh>
         <mesh position={[0, 0, 0.0002]}>
-          <planeGeometry args={[0.234, 0.089]} />
+          <planeGeometry args={[0.468, 0.178]} />
           <meshBasicMaterial
             color="#ffffff"
             opacity={0.95}
@@ -1125,7 +1123,7 @@ function MirrorDimensions({
         </mesh>
         <Text
           position={[0, 0, 0.0004]}
-          fontSize={0.025}
+          fontSize={0.08}
           color="#333333"
           fontWeight={600}
           anchorX="center"
@@ -1135,7 +1133,6 @@ function MirrorDimensions({
         </Text>
       </group>
       
-      {/* Правий індикатор висоти: така сама стилістика, як у верхнього */}
       <mesh position={[rightLineX, 0, -mountDepth + 0.21]} rotation={[0, 0, Math.PI / 2]}>
         <planeGeometry args={[mirrorHeight, 0.007]} />
         <meshBasicMaterial color="#333333" side={THREE.DoubleSide} />
@@ -1159,11 +1156,11 @@ function MirrorDimensions({
 
       <group position={[rightLineX, 0, -mountDepth + 0.211]} rotation={[0, 0, Math.PI / 2]}>
         <mesh position={[0, 0, 0]}>
-          <planeGeometry args={[0.24, 0.095]} />
+          <planeGeometry args={[0.48, 0.19]} />
           <meshBasicMaterial color="#e5e7eb" side={THREE.DoubleSide} />
         </mesh>
         <mesh position={[0, 0, 0.0002]}>
-          <planeGeometry args={[0.234, 0.089]} />
+          <planeGeometry args={[0.468, 0.178]} />
           <meshBasicMaterial
             color="#ffffff"
             opacity={0.95}
@@ -1173,7 +1170,7 @@ function MirrorDimensions({
         </mesh>
         <Text
           position={[0, 0, 0.0004]}
-          fontSize={0.025}
+          fontSize={0.08}
           color="#333333"
           fontWeight={600}
           anchorX="center"

@@ -8,6 +8,23 @@ import ConfigStep from "../components/ConfigStep";
 const MIN_MM = 400;
 const MAX_MM = 2800;
 
+type LightingConfig = {
+  stripWidthMm: number;
+  vertSideOffsetMm: number;
+  vertTopOffsetMm: number;
+  vertBottomOffsetMm: number;
+};
+
+type AmbientBacklightMode =
+  | "none"
+  | "top"
+  | "bottom"
+  | "sides"
+  | "top-sides"
+  | "bottom-sides"
+  | "top-bottom"
+  | "all";
+
 const SIZE_LIMITS: Record<
   string,
   { b_min: number; b_max: number; h_min: number; h_max: number }
@@ -100,7 +117,6 @@ function HomePageContent() {
   const [inputWidthMm, setInputWidthMm] = useState("900");
   const [inputHeightMm, setInputHeightMm] = useState("1600");
   const [showWall, setShowWall] = useState(true);
-  const [showLight, setShowLight] = useState(true);
   const [showClock, setShowClock] = useState(false);
   const [clockCorner, setClockCorner] = useState<"top-left" | "top-center" | "top-right" | "right-center" | "bottom-right" | "bottom-center" | "bottom-left" | "left-center" | null>(null);
   const [showSocket, setShowSocket] = useState(false);
@@ -113,7 +129,16 @@ function HomePageContent() {
   const [wallToolActive, setWallToolActive] = useState(true);
   const [lightToolActive, setLightToolActive] = useState(true);
   const [rulerToolActive, setRulerToolActive] = useState(true);
-  const [lightingMode, setLightingMode] = useState<"none" | "sides" | "frame" | "top-sides">("none");
+  const [lightingMode, setLightingMode] = useState<"none" | "sides" | "frame" | "top-sides">("sides");
+  const [lightTemperatureK, setLightTemperatureK] = useState(4000);
+  const [ambientBacklightMode, setAmbientBacklightMode] =
+    useState<AmbientBacklightMode>("none");
+  const [lightingConfig, setLightingConfig] = useState<LightingConfig>({
+    stripWidthMm: 30,
+    vertSideOffsetMm: 40,
+    vertTopOffsetMm: 60,
+    vertBottomOffsetMm: 60,
+  });
   const [showShelf, setShowShelf] = useState(false);
   const [shelfLengthMm, setShelfLengthMm] = useState(800);
   const [activeStep, setActiveStep] = useState<number>(1);
@@ -166,6 +191,43 @@ function HomePageContent() {
       }
     }
   }, [mirrorIdFromUrl, mirrorSizeFromUrl]);
+
+  useEffect(() => {
+    const productId = mirrorIdFromUrl?.trim() || "23582";
+
+    const parseMm = (value: unknown, fallback: number): number => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+    };
+
+    const mapLightingMode = (strType: unknown): "none" | "sides" | "frame" | "top-sides" => {
+      const value = String(strType || "").toLowerCase();
+      if (value === "xside") return "sides";
+      if (value === "xframe") return "frame";
+      if (value === "xtopside") return "top-sides";
+      return "sides";
+    };
+
+    const loadProductAttributes = async () => {
+      try {
+        const res = await fetch(`/api/product-attributes/${productId}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as Record<string, unknown>;
+
+        setLightingMode(mapLightingMode(data.str_type));
+        setLightingConfig({
+          stripWidthMm: parseMm(data.str_widt, 30),
+          vertSideOffsetMm: parseMm(data.str_vert_bside, 40),
+          vertTopOffsetMm: parseMm(data.str_vert_top, 60),
+          vertBottomOffsetMm: parseMm(data.str_vert_btm, 60),
+        });
+      } catch (error) {
+        console.warn("Failed to load product attributes", error);
+      }
+    };
+
+    loadProductAttributes();
+  }, [mirrorIdFromUrl]);
 
   // Preisberechnung
   const calculatePrice = () => {
@@ -273,7 +335,7 @@ function HomePageContent() {
             widthMm={widthMm}
             heightMm={heightMm}
             showWall={wallToolActive}
-            showroomLight={lightToolActive && showLight}
+            showroomLight={lightToolActive}
             showClock={showClock}
             clockCorner={clockCorner}
             onClockCornerChange={setClockCorner}
@@ -289,6 +351,9 @@ function HomePageContent() {
             cameraView={cameraView}
             showDimensions={rulerToolActive}
             lightingMode={lightingMode}
+            lightingConfig={lightingConfig}
+            lightTemperatureK={lightTemperatureK}
+            ambientBacklightMode={ambientBacklightMode}
             showShelf={showShelf}
             shelfLengthMm={shelfLengthMm}
           />
@@ -310,7 +375,6 @@ function HomePageContent() {
               className={`tool-button ${lightToolActive ? "active" : ""}`}
               onClick={() => {
                 setLightToolActive((prev) => !prev);
-                setShowLight(!showLight);
               }}
               aria-label="Beleuchtung"
               title={lightToolActive ? "Licht aus" : "Licht ein"}
@@ -912,6 +976,8 @@ function HomePageContent() {
             widthMm={committedWidthMm}
             heightMm={committedHeightMm}
             onSummChange={setJtlSumm}
+            onLightTemperatureChange={setLightTemperatureK}
+            onAmbientBacklightChange={setAmbientBacklightMode}
             activeStep={activeStep}
           />
         </div>

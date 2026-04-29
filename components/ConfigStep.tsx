@@ -116,6 +116,18 @@ type GroupSelection = {
 type Props = {
   onSelectionChange?: (groups: GroupSelection[]) => void;
   onSummChange?: (summ: number) => void;
+  onLightTemperatureChange?: (kelvin: number) => void;
+  onAmbientBacklightChange?: (
+    mode:
+      | "none"
+      | "top"
+      | "bottom"
+      | "sides"
+      | "top-sides"
+      | "bottom-sides"
+      | "top-bottom"
+      | "all"
+  ) => void;
   widthMm?: number;
   heightMm?: number;
   activeStep?: number;
@@ -457,9 +469,54 @@ function pickCustomSizeItemId(group0: RawConfigGroup | undefined): number | null
   return null;
 }
 
+function parseKelvinFromLabel(labelRaw: string | undefined | null): number | null {
+  const label = plainLabelFromApi(labelRaw ?? "").toLowerCase();
+  const kelvinMatch = label.match(/(\d[\d\.\s]{2,6})\s*k/);
+  if (kelvinMatch) {
+    const normalized = kelvinMatch[1].replace(/[^\d]/g, "");
+    const k = Number(normalized);
+    if (Number.isFinite(k)) return k;
+  }
+  if (/cct|einstellbar|2500|6000/.test(label)) return 4000;
+  return null;
+}
+
+function parseAmbientBacklightModeFromLabel(
+  labelRaw: string | undefined | null
+):
+  | "none"
+  | "top"
+  | "bottom"
+  | "sides"
+  | "top-sides"
+  | "bottom-sides"
+  | "top-bottom"
+  | "all" {
+  const label = plainLabelFromApi(labelRaw ?? "").toLowerCase();
+  if (!label) return "none";
+  if (/ohne|kein|none|aus/.test(label)) return "none";
+
+  const hasTop = /oben|top/.test(label);
+  const hasBottom = /unten|bottom/.test(label);
+  const hasSides = /seite|seiten|seitlich|links|rechts|left|right/.test(label);
+  const hasAll = /rundum|umlauf|perimeter|all/.test(label);
+
+  if (hasAll) return "all";
+  if (hasTop && hasBottom && hasSides) return "all";
+  if (hasTop && hasSides) return "top-sides";
+  if (hasBottom && hasSides) return "bottom-sides";
+  if (hasTop && hasBottom) return "top-bottom";
+  if (hasTop) return "top";
+  if (hasBottom) return "bottom";
+  if (hasSides) return "sides";
+  return "all";
+}
+
 export default function ConfigStep({
   onSelectionChange,
   onSummChange,
+  onLightTemperatureChange,
+  onAmbientBacklightChange,
   widthMm: widthMmFromStep1,
   heightMm: heightMmFromStep1,
   activeStep = 2,
@@ -686,6 +743,62 @@ export default function ConfigStep({
   }, []);
 
   const [selections, setSelections] = useState<GroupSelection[]>([]);
+
+  useEffect(() => {
+    if (!onLightTemperatureChange) return;
+    if (!optionGroups.length || !selections.length) return;
+
+    const lightGroupIndex = optionGroups.findIndex(
+      (g) => g.kKonfiggruppe === LICHTFARBE_KONFIG_GRUPPE
+    );
+    if (lightGroupIndex < 0) return;
+
+    const selectedId =
+      selections.find((s) => s.groupIndex === lightGroupIndex)?.selectedItemIds?.[0] ??
+      null;
+    if (!selectedId) return;
+
+    const selectedItem =
+      optionGroups[lightGroupIndex]?.oItem_arr?.find(
+        (i) => i.kKonfigitem === selectedId
+      ) ?? null;
+    if (!selectedItem) return;
+
+    const k = parseKelvinFromLabel(selectedItem.cName);
+    if (k != null) onLightTemperatureChange(k);
+  }, [optionGroups, selections, onLightTemperatureChange]);
+
+  useEffect(() => {
+    if (!onAmbientBacklightChange) return;
+    if (!optionGroups.length || !selections.length) return;
+
+    const ambientGroupIndex = optionGroups.findIndex((g) =>
+      plainLabelFromApi(g.oSprache?.cName ?? g.cKommentar ?? "")
+        .toLowerCase()
+        .replace(/\s+/g, "")
+        .includes("ambientelicht")
+    );
+    if (ambientGroupIndex < 0) {
+      onAmbientBacklightChange("none");
+      return;
+    }
+
+    const selectedId =
+      selections.find((s) => s.groupIndex === ambientGroupIndex)?.selectedItemIds?.[0] ??
+      null;
+    if (!selectedId) {
+      onAmbientBacklightChange("none");
+      return;
+    }
+
+    const selectedItem =
+      optionGroups[ambientGroupIndex]?.oItem_arr?.find(
+        (i) => i.kKonfigitem === selectedId
+      ) ?? null;
+    onAmbientBacklightChange(
+      parseAmbientBacklightModeFromLabel(selectedItem?.cName)
+    );
+  }, [optionGroups, selections, onAmbientBacklightChange]);
 
   const visibleGroupIndices = useMemo(() => {
     // Поки мапа не завантажилась — не ламаємо UX: на кроках 2..4 показуємо всі групи.
@@ -1108,6 +1221,33 @@ export default function ConfigStep({
   };
 
   const handleSingleSelectChange = (groupIdx: number, itemId: number) => {
+    const selectedGroup = optionGroups[groupIdx];
+    if (
+      selectedGroup?.kKonfiggruppe === LICHTFARBE_KONFIG_GRUPPE &&
+      onLightTemperatureChange
+    ) {
+      const selectedItem = selectedGroup.oItem_arr.find(
+        (it) => it.kKonfigitem === itemId
+      );
+      const k = parseKelvinFromLabel(selectedItem?.cName);
+      if (k != null) onLightTemperatureChange(k);
+    }
+    if (onAmbientBacklightChange) {
+      const groupTitle = plainLabelFromApi(
+        selectedGroup?.oSprache?.cName ?? selectedGroup?.cKommentar ?? ""
+      )
+        .toLowerCase()
+        .replace(/\s+/g, "");
+      if (groupTitle.includes("ambientelicht")) {
+        const selectedItem = selectedGroup?.oItem_arr.find(
+          (it) => it.kKonfigitem === itemId
+        );
+        onAmbientBacklightChange(
+          parseAmbientBacklightModeFromLabel(selectedItem?.cName)
+        );
+      }
+    }
+
     setSelections((prev) => {
       const next = prev.map((g) =>
         g.groupIndex === groupIdx

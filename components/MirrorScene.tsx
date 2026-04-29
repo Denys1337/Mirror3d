@@ -2,7 +2,6 @@
 
 import { Canvas, useThree, useFrame, ThreeEvent } from "@react-three/fiber";
 import { OrbitControls, MeshReflectorMaterial, Environment, useTexture, RoundedBox, useGLTF, Text } from "@react-three/drei";
-import { Color } from "three";
 import { useRef, useState, useMemo, useEffect } from "react";
 import * as THREE from "three";
 
@@ -32,6 +31,22 @@ export interface MirrorSceneProps {
   cameraView?: "top" | "left" | "right" | "front"; // Kamera-Ansicht
   showDimensions?: boolean; // Розміри зеркала показувати
   lightingMode?: "none" | "sides" | "frame" | "top-sides"; // Schema der Leuchtstreifen
+  lightTemperatureK?: number;
+  ambientBacklightMode?:
+    | "none"
+    | "top"
+    | "bottom"
+    | "sides"
+    | "top-sides"
+    | "bottom-sides"
+    | "top-bottom"
+    | "all";
+  lightingConfig?: {
+    stripWidthMm: number;
+    vertSideOffsetMm: number;
+    vertTopOffsetMm: number;
+    vertBottomOffsetMm: number;
+  };
 }
 
 // Umrechnungsfaktor mm -> Meter in der Szene
@@ -1188,12 +1203,31 @@ function MirrorObject({
   widthMm,
   heightMm,
   showroomLight,
-  lightingMode = "none"
+  lightingMode = "none",
+  lightTemperatureK = 4000,
+  ambientBacklightMode = "none",
+  lightingConfig
 }: {
   widthMm: number;
   heightMm: number;
   showroomLight: boolean;
   lightingMode?: "none" | "sides" | "frame" | "top-sides";
+  lightTemperatureK?: number;
+  ambientBacklightMode?:
+    | "none"
+    | "top"
+    | "bottom"
+    | "sides"
+    | "top-sides"
+    | "bottom-sides"
+    | "top-bottom"
+    | "all";
+  lightingConfig?: {
+    stripWidthMm: number;
+    vertSideOffsetMm: number;
+    vertTopOffsetMm: number;
+    vertBottomOffsetMm: number;
+  };
 }) {
   const width = widthMm * MM_TO_M;
   const height = heightMm * MM_TO_M;
@@ -1201,37 +1235,85 @@ function MirrorObject({
   const mirrorDepth = 0.01;
   const mountDepth = 0.06;
   
-  // Textur mit radialem Gradient für weiche Lichtstreuung erstellen
-  const glowTexture = useMemo(() => {
-    const size = 512;
-    const canvas = document.createElement('canvas');
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
-    
-    // Radialen Gradient vom Zentrum erstellen
-    const centerX = size / 2;
-    const centerY = size / 2;
-    const maxRadius = size / 2;
-    
-    const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, maxRadius);
-    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)'); // Helles Weiß im Zentrum
-    gradient.addColorStop(0.2, 'rgba(255, 255, 255, 0.9)'); // Helles Weiß
-    gradient.addColorStop(0.4, 'rgba(255, 255, 255, 0.5)'); // Mittlere Helligkeit
-    gradient.addColorStop(0.6, 'rgba(255, 255, 255, 0.2)'); // Schwaches Licht
-    gradient.addColorStop(0.8, 'rgba(255, 255, 255, 0.05)'); // Sehr schwach
-    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)'); // Transparent an den Rändern
-    
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, size, size);
-    
+  // Realistic edge glow with rounded ends and soft diffusion.
+  const createEdgeGlowTexture = (
+    widthPx: number,
+    heightPx: number,
+    direction: "down" | "up" | "right" | "left"
+  ) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = widthPx;
+    canvas.height = heightPx;
+    const ctx = canvas.getContext("2d")!;
+
+    const image = ctx.createImageData(widthPx, heightPx);
+    const data = image.data;
+
+    const smoothstep = (e0: number, e1: number, x: number) => {
+      const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+      return t * t * (3 - 2 * t);
+    };
+
+    for (let y = 0; y < heightPx; y++) {
+      for (let x = 0; x < widthPx; x++) {
+        const ux = x / (widthPx - 1);
+        const uy = y / (heightPx - 1);
+
+        // Fade on both ends of side to make rounded caps.
+        const along = direction === "down" || direction === "up" ? ux : uy;
+        const alongCenterDist = Math.abs(along - 0.5) / 0.5; // 0..1
+        const edgeFade =
+          smoothstep(0.0, 0.14, along) * smoothstep(1.0, 0.86, along);
+        // Oval shaping along the side (stronger center, soft rounded ends).
+        const ovalAlong = Math.exp(-Math.pow(alongCenterDist / 0.72, 2));
+
+        // Diffusion from edge inward.
+        let inward = 0;
+        if (direction === "down") inward = 1 - uy;
+        if (direction === "up") inward = uy;
+        if (direction === "right") inward = 1 - ux;
+        if (direction === "left") inward = ux;
+
+        const inwardFade = Math.pow(Math.max(0, inward), 1.15);
+        // Additional oval shaping from edge inward for a softer elliptical bloom.
+        const ovalInward = Math.exp(-Math.pow((1 - inward) / 1.15, 2));
+        const alpha = Math.max(
+          0,
+          Math.min(1, edgeFade * inwardFade * ovalAlong * ovalInward)
+        );
+
+        const i = (y * widthPx + x) * 4;
+        data[i] = 255;
+        data[i + 1] = 255;
+        data[i + 2] = 255;
+        data[i + 3] = Math.round(alpha * 255);
+      }
+    }
+
+    ctx.putImageData(image, 0, 0);
     const tex = new THREE.CanvasTexture(canvas);
     tex.wrapS = THREE.ClampToEdgeWrapping;
     tex.wrapT = THREE.ClampToEdgeWrapping;
     return tex;
-  }, []);
+  };
 
-  const frameColor = new Color("#f9fafb");
+  const topGlowTexture = useMemo(
+    () => createEdgeGlowTexture(1024, 320, "up"),
+    []
+  );
+  const bottomGlowTexture = useMemo(
+    () => createEdgeGlowTexture(1024, 320, "down"),
+    []
+  );
+  const leftGlowTexture = useMemo(
+    () => createEdgeGlowTexture(320, 1024, "left"),
+    []
+  );
+  const rightGlowTexture = useMemo(
+    () => createEdgeGlowTexture(320, 1024, "right"),
+    []
+  );
+
   const mountWidth = width - frameThickness * 2;
   const mountHeight = height - frameThickness * 2;
   const dashLength = 0.02;
@@ -1260,10 +1342,28 @@ function MirrorObject({
   // Leuchtstreifen-Geometrie (Beleuchtung direkt auf dem Spiegel)
   const lightStrips: JSX.Element[] = [];
   if (lightingMode !== "none") {
+    const getLightEmissiveColor = (kelvin: number): THREE.Color => {
+      // Match UI swatches from step-2 selector.
+      if (kelvin <= 2800) return new THREE.Color("#efe8b3");
+      if (kelvin <= 3300) return new THREE.Color("#ece8cd");
+      if (kelvin <= 4300) return new THREE.Color("#f2f2e8");
+      return new THREE.Color("#eef4ff");
+    };
     // Gemeinsame Parameter:
-    const stripWidth = 0.03; // 30 mm
+    const stripWidth = (lightingConfig?.stripWidthMm ?? 30) * MM_TO_M;
+    const sideOffsetX = (lightingConfig?.vertSideOffsetMm ?? 40) * MM_TO_M;
+    const edgeOffsetYTop = (lightingConfig?.vertTopOffsetMm ?? 60) * MM_TO_M;
+    const edgeOffsetYBottom = (lightingConfig?.vertBottomOffsetMm ?? 60) * MM_TO_M;
     const stripDepth = 0.002;
-    const emissiveColor = new THREE.Color(0xf59e0b);
+    const renderStripMaterial = () => {
+      if (showroomLight) {
+        const lightColor = getLightEmissiveColor(lightTemperatureK);
+        // Use non-tone-mapped material so 2700/3000/4000K remains visibly distinct.
+        return <meshBasicMaterial color={lightColor} toneMapped={false} />;
+      }
+      // OFF mode: fixed gray independent of scene lights.
+      return <meshBasicMaterial color="#6b7280" toneMapped={false} />;
+    };
     // Spiegel-Ebene liegt bei mountDepth + 0.146 (siehe Spiegelmesh weiter unten).
     // Wir setzen die Leuchtstreifen minimal davor, damit sie "auf" dem Spiegel sitzen.
     const mirrorPlaneZ = mountDepth + 0.146;
@@ -1274,9 +1374,8 @@ function MirrorObject({
       // - Obere Leiste: 60 mm von links/rechts und 60 mm vom oberen Rand
       // - Vertikale Leisten: 40 mm von den Seiten, 60 mm vom unteren Rand,
       //   und 60 mm Abstand unterhalb der oberen Leiste.
-      const topSideOffset = 0.06; // 60 mm
-      const sideOffsetX = 0.04; // 40 mm
-      const bottomOffset = 0.06; // 60 mm
+      const topSideOffset = edgeOffsetYTop;
+      const bottomOffset = edgeOffsetYBottom;
 
       const topEdge = height / 2;
       const bottomEdge = -height / 2;
@@ -1287,11 +1386,7 @@ function MirrorObject({
       lightStrips.push(
         <mesh key="top-strip" position={[0, yTop, stripZ]}>
           <boxGeometry args={[topStripLength, stripWidth, stripDepth]} />
-          <meshStandardMaterial
-            color="#ffffff"
-            emissive={emissiveColor}
-            emissiveIntensity={2.5}
-          />
+          {renderStripMaterial()}
         </mesh>
       );
 
@@ -1308,52 +1403,38 @@ function MirrorObject({
         lightStrips.push(
           <mesh key={`vs-${idx}`} position={[x, verticalCenterY, stripZ]}>
             <boxGeometry args={[stripWidth, verticalHeight, stripDepth]} />
-            <meshStandardMaterial
-              color="#ffffff"
-              emissive={emissiveColor}
-              emissiveIntensity={2.5}
-            />
+            {renderStripMaterial()}
           </mesh>
         );
       });
     } else {
-      // Einfachere Varianten: feste 40 mm Abstand zu allen Kanten
-      const edgeOffsetX = 0.04; // 40 mm von den Seiten
-      const edgeOffsetYTop = 0.04; // 40 mm vom oberen Rand
-      const edgeOffsetYBottom = 0.04; // 40 mm vom unteren Rand
-
       const addVerticalStrip = (x: number) => {
-        const stripHeight = height - edgeOffsetYTop - edgeOffsetYBottom;
+        const stripHeight = Math.max(
+          0.001,
+          height - edgeOffsetYTop - edgeOffsetYBottom
+        );
         lightStrips.push(
           <mesh key={`v-${x}`} position={[x, 0, stripZ]}>
             <boxGeometry args={[stripWidth, stripHeight, stripDepth]} />
-            <meshStandardMaterial
-              color="#ffffff"
-              emissive={emissiveColor}
-              emissiveIntensity={2.5}
-            />
+            {renderStripMaterial()}
           </mesh>
         );
       };
 
       const addHorizontalStrip = (y: number) => {
-        const stripLength = width - edgeOffsetX * 2;
+        const stripLength = Math.max(0.001, width - sideOffsetX * 2);
         lightStrips.push(
           <mesh key={`h-${y}`} position={[0, y, stripZ]}>
             <boxGeometry args={[stripLength, stripWidth, stripDepth]} />
-            <meshStandardMaterial
-              color="#ffffff"
-              emissive={emissiveColor}
-              emissiveIntensity={2.5}
-            />
+            {renderStripMaterial()}
           </mesh>
         );
       };
 
       // Seitenstreifen (links + rechts)
       if (lightingMode === "sides" || lightingMode === "frame") {
-        const xLeft = -width / 2 + edgeOffsetX + stripWidth / 2;
-        const xRight = width / 2 - edgeOffsetX - stripWidth / 2;
+        const xLeft = -width / 2 + sideOffsetX + stripWidth / 2;
+        const xRight = width / 2 - sideOffsetX - stripWidth / 2;
         addVerticalStrip(xLeft);
         addVerticalStrip(xRight);
       }
@@ -1441,56 +1522,98 @@ function MirrorObject({
         />
       </mesh>
 
-      {/* Рамка навколо дзеркала */}
-      <mesh position={[0, 0, mountDepth + mirrorDepth + 0.13]}>
-        <boxGeometry args={[width + frameThickness, height + frameThickness, mirrorDepth]} />
-        <meshStandardMaterial color={frameColor} roughness={0.4} metalness={0.2} />
-      </mesh>
-
       {/* Підсвітка: реалістичне м'яке світло навколо дзеркала на стіні */}
-      {showroomLight && (() => {
-        const glowSize = Math.max(width, height) * 0.4; // Збільшений розмір ореолу
+      {showroomLight && ambientBacklightMode !== "none" && (() => {
+        const glowSize = Math.max(width, height) * 0.56;
+        const showTop =
+          ambientBacklightMode === "top" ||
+          ambientBacklightMode === "top-sides" ||
+          ambientBacklightMode === "top-bottom" ||
+          ambientBacklightMode === "all";
+        const showBottom =
+          ambientBacklightMode === "bottom" ||
+          ambientBacklightMode === "bottom-sides" ||
+          ambientBacklightMode === "top-bottom" ||
+          ambientBacklightMode === "all";
+        const showSides =
+          ambientBacklightMode === "sides" ||
+          ambientBacklightMode === "top-sides" ||
+          ambientBacklightMode === "bottom-sides" ||
+          ambientBacklightMode === "all";
+        const glowIntensityMul = 1;
+        const glowOpacityMul = 1;
+        const inwardSizeMul = 1;
         
         return (
           <group>
-            {/* Основний ореол світла - найближчий до дзеркала */}
-            <mesh position={[0, 0, -mountDepth + 0.207]}>
-              <planeGeometry args={[width + glowSize * 0.5, height + glowSize * 0.5]} />
-              <meshStandardMaterial
-                map={glowTexture}
-                emissive="#ffffff"
-                emissiveIntensity={7.0}
-                transparent
-                opacity={1}
-                roughness={1}
-              />
-            </mesh>
-            
-            {/* Середній ореол - м'який перехід */}
-            <mesh position={[0, 0, -mountDepth + 0.206]}>
-              <planeGeometry args={[width + glowSize * 1.2, height + glowSize * 1.2]} />
-              <meshStandardMaterial
-                map={glowTexture}
-                emissive="#ffffff"
-                emissiveIntensity={4.0}
-                transparent
-                opacity={1}
-                roughness={1}
-              />
-            </mesh>
-            
-            {/* Зовнішній ореол - дуже м'який розсіювання */}
-            <mesh position={[0, 0, -mountDepth + 0.205]}>
-              <planeGeometry args={[width + glowSize * 2.2, height + glowSize * 2.2]} />
-              <meshStandardMaterial
-                map={glowTexture}
-                emissive="#ffffff"
-                emissiveIntensity={2.5}
-                transparent
-                opacity={0.8}
-                roughness={1}
-              />
-            </mesh>
+            {showTop && (
+              <mesh position={[0, height / 2 + glowSize * 0.09, -mountDepth + 0.207]}>
+                <planeGeometry
+                  args={[width * 1.14, glowSize * 0.95 * inwardSizeMul]}
+                />
+                <meshBasicMaterial
+                  map={topGlowTexture}
+                  color="#ffffff"
+                  transparent
+                  opacity={0.97 * glowOpacityMul}
+                  blending={THREE.AdditiveBlending}
+                  depthWrite={false}
+                  depthTest={true}
+                  toneMapped={false}
+                />
+              </mesh>
+            )}
+            {showBottom && (
+              <mesh position={[0, -height / 2 - glowSize * 0.09, -mountDepth + 0.207]}>
+                <planeGeometry
+                  args={[width * 1.14, glowSize * 0.95 * inwardSizeMul]}
+                />
+                <meshBasicMaterial
+                  map={bottomGlowTexture}
+                  color="#ffffff"
+                  transparent
+                  opacity={0.93 * glowOpacityMul}
+                  blending={THREE.AdditiveBlending}
+                  depthWrite={false}
+                  depthTest={true}
+                  toneMapped={false}
+                />
+              </mesh>
+            )}
+            {showSides && (
+              <>
+                <mesh position={[-width / 2 - glowSize * 0.09, 0, -mountDepth + 0.206]}>
+                  <planeGeometry
+                    args={[glowSize * 0.92 * inwardSizeMul, height * 1.14]}
+                  />
+                  <meshBasicMaterial
+                    map={leftGlowTexture}
+                    color="#ffffff"
+                    transparent
+                    opacity={0.95 * glowOpacityMul}
+                    blending={THREE.AdditiveBlending}
+                    depthWrite={false}
+                    depthTest={true}
+                    toneMapped={false}
+                  />
+                </mesh>
+                <mesh position={[width / 2 + glowSize * 0.09, 0, -mountDepth + 0.206]}>
+                  <planeGeometry
+                    args={[glowSize * 0.92 * inwardSizeMul, height * 1.14]}
+                  />
+                  <meshBasicMaterial
+                    map={rightGlowTexture}
+                    color="#ffffff"
+                    transparent
+                    opacity={0.95 * glowOpacityMul}
+                    blending={THREE.AdditiveBlending}
+                    depthWrite={false}
+                    depthTest={true}
+                    toneMapped={false}
+                  />
+                </mesh>
+              </>
+            )}
           </group>
         );
       })()}
@@ -1784,7 +1907,10 @@ export default function MirrorScene({
   hygieneMirrorCorner = "bottom-left",
   cameraView,
   showDimensions = false,
-  lightingMode = "none"
+  lightingMode = "none",
+  lightTemperatureK = 4000,
+  ambientBacklightMode = "none",
+  lightingConfig
 }: MirrorSceneProps) {
   const controlsRef = useRef<any>(null);
 
@@ -1814,39 +1940,68 @@ export default function MirrorScene({
       <pointLight position={[0, 3, 1]} intensity={6.5} distance={18} decay={1.0} />
 
       {/* Підсвічування по периметру дзеркала реальними джерелами світла */}
-      {showroomLight && (
+      {showroomLight &&
+        ambientBacklightMode !== "none" &&
+        ambientBacklightMode !== "all" && (
         <group>
-          {/* Верхній м'який прожектор */}
-          <spotLight
-            position={[0, 2.4, 0.6]}
-            angle={Math.PI / 4}
-            penumbra={0.9}
-            intensity={2.4}
-            castShadow
-          />
-          {/* Нижній слабший прожектор */}
-          <spotLight
-            position={[0, -0.1, 0.6]}
-            angle={Math.PI / 4}
-            penumbra={0.9}
-            intensity={1.1}
-            castShadow
-          />
-          {/* Бокові для заповнення світлом */}
-          <spotLight
-            position={[-1.4, 1.2, 0.8]}
-            angle={Math.PI / 4}
-            penumbra={0.9}
-            intensity={1.4}
-            castShadow
-          />
-          <spotLight
-            position={[1.4, 1.2, 0.8]}
-            angle={Math.PI / 4}
-            penumbra={0.9}
-            intensity={1.4}
-            castShadow
-          />
+          {(ambientBacklightMode === "top" ||
+            ambientBacklightMode === "top-sides" ||
+            ambientBacklightMode === "top-bottom") && (
+            <>
+              {[-1.35, -0.45, 0.45, 1.35].map((x) => (
+                <spotLight
+                  key={`top-${x}`}
+                  position={[x, 2.4, 0.6]}
+                  angle={Math.PI / 5}
+                  penumbra={0.95}
+                  intensity={1.15}
+                  castShadow
+                />
+              ))}
+            </>
+          )}
+          {(ambientBacklightMode === "bottom" ||
+            ambientBacklightMode === "bottom-sides" ||
+            ambientBacklightMode === "top-bottom") && (
+            <>
+              {[-1.35, -0.45, 0.45, 1.35].map((x) => (
+                <spotLight
+                  key={`bottom-${x}`}
+                  position={[x, -0.1, 0.6]}
+                  angle={Math.PI / 5}
+                  penumbra={0.95}
+                  intensity={0.7}
+                  castShadow
+                />
+              ))}
+            </>
+          )}
+          {(ambientBacklightMode === "sides" ||
+            ambientBacklightMode === "top-sides" ||
+            ambientBacklightMode === "bottom-sides") && (
+            <>
+              {[0.45, 1.1, 1.75].map((y) => (
+                <spotLight
+                  key={`left-${y}`}
+                  position={[-1.4, y, 0.8]}
+                  angle={Math.PI / 5}
+                  penumbra={0.95}
+                  intensity={0.9}
+                  castShadow
+                />
+              ))}
+              {[0.45, 1.1, 1.75].map((y) => (
+                <spotLight
+                  key={`right-${y}`}
+                  position={[1.4, y, 0.8]}
+                  angle={Math.PI / 5}
+                  penumbra={0.95}
+                  intensity={0.9}
+                  castShadow
+                />
+              ))}
+            </>
+          )}
         </group>
       )}
 
@@ -1865,6 +2020,9 @@ export default function MirrorScene({
           heightMm={heightMm}
           showroomLight={showroomLight}
           lightingMode={lightingMode}
+          lightTemperatureK={lightTemperatureK}
+          ambientBacklightMode={ambientBacklightMode}
+          lightingConfig={lightingConfig}
         />
         {showShelf && (
           <GlassShelf

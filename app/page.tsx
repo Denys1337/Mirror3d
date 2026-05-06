@@ -13,6 +13,23 @@ type LightingConfig = {
   vertSideOffsetMm: number;
   vertTopOffsetMm: number;
   vertBottomOffsetMm: number;
+  horiSideOffsetMm: number;
+  horiTopInsetMm: number;
+  horiBottomInsetMm: number;
+};
+
+type ProductLightingPayload = {
+  mir_type: string;
+  str_type: string;
+  mir_model: string;
+  str_widt: string;
+  str_vert_bside: string;
+  str_vert_top: string;
+  str_vert_btm: string;
+  str_hori_bside: string;
+  str_hori_top: string;
+  str_hori_btm: string;
+  shining_sid: string;
 };
 
 type AmbientBacklightMode =
@@ -24,6 +41,15 @@ type AmbientBacklightMode =
   | "bottom-sides"
   | "top-bottom"
   | "all";
+
+type FrontLightingMode =
+  | "none"
+  | "sides"
+  | "top"
+  | "top-bottom"
+  | "top-sides"
+  | "around"
+  | "frame";
 
 const SIZE_LIMITS: Record<
   string,
@@ -129,7 +155,7 @@ function HomePageContent() {
   const [wallToolActive, setWallToolActive] = useState(true);
   const [lightToolActive, setLightToolActive] = useState(true);
   const [rulerToolActive, setRulerToolActive] = useState(true);
-  const [lightingMode, setLightingMode] = useState<"none" | "sides" | "frame" | "top-sides">("sides");
+  const [lightingMode, setLightingMode] = useState<FrontLightingMode>("sides");
   const [lightTemperatureK, setLightTemperatureK] = useState(4000);
   const [ambientBacklightMode, setAmbientBacklightMode] =
     useState<AmbientBacklightMode>("none");
@@ -138,7 +164,24 @@ function HomePageContent() {
     vertSideOffsetMm: 40,
     vertTopOffsetMm: 60,
     vertBottomOffsetMm: 60,
+    horiSideOffsetMm: 0,
+    horiTopInsetMm: 0,
+    horiBottomInsetMm: 0,
   });
+  const [productLightingPayload, setProductLightingPayload] =
+    useState<ProductLightingPayload>({
+      mir_type: "square",
+      str_type: "xside",
+      mir_model: "comfort",
+      str_widt: "30",
+      str_vert_bside: "40",
+      str_vert_top: "60",
+      str_vert_btm: "60",
+      str_hori_bside: "0",
+      str_hori_top: "0",
+      str_hori_btm: "0",
+      shining_sid: "no",
+    });
   const [showShelf, setShowShelf] = useState(false);
   const [shelfLengthMm, setShelfLengthMm] = useState(800);
   const [activeStep, setActiveStep] = useState<number>(1);
@@ -200,11 +243,16 @@ function HomePageContent() {
       return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
     };
 
-    const mapLightingMode = (strType: unknown): "none" | "sides" | "frame" | "top-sides" => {
+    const mapLightingMode = (strType: unknown): FrontLightingMode => {
       const value = String(strType || "").toLowerCase();
+      if (value === "xnolight") return "none";
       if (value === "xside") return "sides";
-      if (value === "xframe") return "frame";
+      if (value === "xtop") return "top";
+      if (value === "xtopdown") return "top-bottom";
       if (value === "xtopside") return "top-sides";
+      if (value === "xaround") return "around";
+      // legacy payload support
+      if (value === "xframe") return "frame";
       return "sides";
     };
 
@@ -214,12 +262,28 @@ function HomePageContent() {
         if (!res.ok) return;
         const data = (await res.json()) as Record<string, unknown>;
 
+        setProductLightingPayload({
+          mir_type: String(data.mir_type ?? "square"),
+          str_type: String(data.str_type ?? "xside"),
+          mir_model: String(data.mir_model ?? "comfort"),
+          str_widt: String(data.str_widt ?? "30"),
+          str_vert_bside: String(data.str_vert_bside ?? "40"),
+          str_vert_top: String(data.str_vert_top ?? "60"),
+          str_vert_btm: String(data.str_vert_btm ?? "60"),
+          str_hori_bside: String(data.str_hori_bside ?? "0"),
+          str_hori_top: String(data.str_hori_top ?? "0"),
+          str_hori_btm: String(data.str_hori_btm ?? "0"),
+          shining_sid: String(data.shining_sid ?? "no"),
+        });
         setLightingMode(mapLightingMode(data.str_type));
         setLightingConfig({
           stripWidthMm: parseMm(data.str_widt, 30),
           vertSideOffsetMm: parseMm(data.str_vert_bside, 40),
           vertTopOffsetMm: parseMm(data.str_vert_top, 60),
           vertBottomOffsetMm: parseMm(data.str_vert_btm, 60),
+          horiSideOffsetMm: parseMm(data.str_hori_bside, 0),
+          horiTopInsetMm: parseMm(data.str_hori_top, 0),
+          horiBottomInsetMm: parseMm(data.str_hori_btm, 0),
         });
       } catch (error) {
         console.warn("Failed to load product attributes", error);
@@ -979,6 +1043,7 @@ function HomePageContent() {
             onLightTemperatureChange={setLightTemperatureK}
             onAmbientBacklightChange={setAmbientBacklightMode}
             activeStep={activeStep}
+            productLightingPayload={productLightingPayload}
           />
         </div>
 

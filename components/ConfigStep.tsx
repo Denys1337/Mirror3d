@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 type KonfigErrorEntry = { message?: string; group?: number };
@@ -37,6 +37,12 @@ function applyKonfigValidityWarning(
   if (response.valid === true) {
     setWarning(null);
   }
+}
+
+function getKonfigValidity(data: unknown): boolean | undefined {
+  const response = getKonfigResponseValue(data);
+  if (!response || typeof response !== "object") return undefined;
+  return typeof response.valid === "boolean" ? response.valid : undefined;
 }
 
 function collectKonfigErrorTexts(
@@ -131,6 +137,19 @@ type Props = {
   widthMm?: number;
   heightMm?: number;
   activeStep?: number;
+  productLightingPayload?: {
+    mir_type: string;
+    str_type: string;
+    mir_model: string;
+    str_widt: string;
+    str_vert_bside: string;
+    str_vert_top: string;
+    str_vert_btm: string;
+    str_hori_bside: string;
+    str_hori_top: string;
+    str_hori_btm: string;
+    shining_sid: string;
+  };
 };
 
 type StepGroupMap = {
@@ -305,7 +324,7 @@ function shouldShowConfigGroupRow(
       selections,
       UHR_WETTERSTATION_KONFIG_GRUPPE
     );
-    if (uhrId != null) return true;
+    return uhrId != null;
   }
 
   if (id === 476) {
@@ -314,7 +333,7 @@ function shouldShowConfigGroupRow(
       selections,
       BEFESTIGUNG_KONFIG_GRUPPE
     );
-    if (befId != null && MONTAGE_AKTIVIERT_476.has(befId)) return true;
+    return befId != null && MONTAGE_AKTIVIERT_476.has(befId);
   }
 
   if (id === SCHALTER_DIMMER_KONFIG_GRUPPE) {
@@ -323,8 +342,9 @@ function shouldShowConfigGroupRow(
       selections,
       LICHTFARBE_KONFIG_GRUPPE
     );
-    if (lichtfarbeId != null && LICHTFARBE_AKTIVIERT_27.has(lichtfarbeId))
-      return true;
+    return (
+      lichtfarbeId != null && LICHTFARBE_AKTIVIERT_27.has(lichtfarbeId)
+    );
   }
 
   if (id === SCHALTER_DIMMER_CCT_KONFIG_GRUPPE) {
@@ -333,8 +353,9 @@ function shouldShowConfigGroupRow(
       selections,
       LICHTFARBE_KONFIG_GRUPPE
     );
-    if (lichtfarbeId != null && LICHTFARBE_AKTIVIERT_509.has(lichtfarbeId))
-      return true;
+    return (
+      lichtfarbeId != null && LICHTFARBE_AKTIVIERT_509.has(lichtfarbeId)
+    );
   }
 
   if (id === 493) {
@@ -348,12 +369,10 @@ function shouldShowConfigGroupRow(
       selections,
       SCHALTER_DIMMER_CCT_KONFIG_GRUPPE
     );
-    if (
+    return (
       (s27 != null && SCHALTER27_AKTIVIERT_493.has(s27)) ||
       (s509 != null && SCHALTER509_AKTIVIERT_493.has(s509))
-    ) {
-      return true;
-    }
+    );
   }
 
   if (id === 431) {
@@ -362,7 +381,7 @@ function shouldShowConfigGroupRow(
       selections,
       SCHALTER_DIMMER_KONFIG_GRUPPE
     );
-    if (s27 != null && SCHALTER27_AKTIVIERT_431.has(s27)) return true;
+    return s27 != null && SCHALTER27_AKTIVIERT_431.has(s27);
   }
 
   if (id === 432) {
@@ -371,7 +390,7 @@ function shouldShowConfigGroupRow(
       selections,
       SCHALTER_DIMMER_CCT_KONFIG_GRUPPE
     );
-    if (s509 != null && SCHALTER509_AKTIVIERT_432.has(s509)) return true;
+    return s509 != null && SCHALTER509_AKTIVIERT_432.has(s509);
   }
 
   if (DEFERRED_KONFIG_GRUPPE_IDS.has(id)) {
@@ -381,6 +400,30 @@ function shouldShowConfigGroupRow(
     return true;
   }
   return true;
+}
+
+function pruneSelectionsForHiddenRows(
+  optionGroups: RawConfigGroup[],
+  selections: GroupSelection[]
+): GroupSelection[] {
+  let current = selections;
+  const passes = Math.max(4, optionGroups.length + 1);
+  for (let p = 0; p < passes; p++) {
+    let changed = false;
+    const next = current.map((sel) => {
+      const group = optionGroups[sel.groupIndex];
+      if (!group) return sel;
+      const visible = shouldShowConfigGroupRow(group, optionGroups, current);
+      if (!visible && sel.selectedItemIds.length > 0) {
+        changed = true;
+        return { groupIndex: sel.groupIndex, selectedItemIds: [] };
+      }
+      return sel;
+    });
+    current = next;
+    if (!changed) break;
+  }
+  return current;
 }
 
 /**
@@ -520,11 +563,13 @@ export default function ConfigStep({
   widthMm: widthMmFromStep1,
   heightMm: heightMmFromStep1,
   activeStep = 2,
+  productLightingPayload,
 }: Props) {
   const [configGroups, setConfigGroups] = useState<RawConfigGroup[]>([]);
   const [stepGroupMap, setStepGroupMap] = useState<StepGroupMap | null>(null);
   const [jtlToken, setJtlToken] = useState<string | null>(null);
   const [configApiWarning, setConfigApiWarning] = useState<string | null>(null);
+  const [, setLastKonfigValid] = useState<boolean | undefined>(undefined);
   const [singleOpenGroupIdx, setSingleOpenGroupIdx] = useState<number | null>(
     null
   );
@@ -592,11 +637,6 @@ export default function ConfigStep({
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, []);
-
-  /* Після buildConfiguration / load_konfig — одразу закрити відкритий dropdown і дати браузеру оновити список до paint. */
-  useLayoutEffect(() => {
-    setSingleOpenGroupIdx(null);
-  }, [configGroups]);
 
   useEffect(() => {
     if (optionInfoPopup == null) return;
@@ -815,6 +855,18 @@ export default function ConfigStep({
       .map((x) => x.idx);
   }, [activeStep, optionGroups, stepGroupMap]);
 
+  // Не закриваємо dropdown на кожний запит; закриваємо лише якщо група справді зникла.
+  useEffect(() => {
+    if (singleOpenGroupIdx == null) return;
+    const stillInStep = visibleGroupIndices.includes(singleOpenGroupIdx);
+    const group = optionGroups[singleOpenGroupIdx];
+    const stillVisibleByRules =
+      !!group && shouldShowConfigGroupRow(group, optionGroups, selections);
+    if (!stillInStep || !stillVisibleByRules) {
+      setSingleOpenGroupIdx(null);
+    }
+  }, [singleOpenGroupIdx, visibleGroupIndices, optionGroups, selections]);
+
   const emitSummIfExists = (data: unknown) => {
     if (!onSummChange) return;
     const summ = extractJtlSumm(data);
@@ -1028,12 +1080,16 @@ export default function ConfigStep({
 
   const mergeSelectionsAfterKonfigResponse = (
     prev: GroupSelection[],
-    updated: RawConfigGroup[]
+    updated: RawConfigGroup[],
+    useFallbackForInvalid: boolean
   ): GroupSelection[] =>
     updated.slice(1).map((group, index) => {
       if (group.bAktiv === false) {
-        const kept = prev.find((s) => s.groupIndex === index)?.selectedItemIds;
-        return { groupIndex: index, selectedItemIds: kept?.length ? kept : [] };
+        if (useFallbackForInvalid) {
+          const kept = prev.find((s) => s.groupIndex === index)?.selectedItemIds;
+          return { groupIndex: index, selectedItemIds: kept?.length ? kept : [] };
+        }
+        return { groupIndex: index, selectedItemIds: [] };
       }
       const activeItems = group.oItem_arr.filter((item) => item.bAktiv);
       const prevIds =
@@ -1124,11 +1180,19 @@ export default function ConfigStep({
     emitSummIfExists(data);
 
     applyKonfigValidityWarning(data, setConfigApiWarning);
+    const validity = getKonfigValidity(data);
+    if (typeof validity === "boolean") setLastKonfigValid(validity);
 
-    const updated =
-      parseResponseFromVarAssigns(data) ?? groupsBase;
+    const updated = parseResponseFromVarAssigns(data) ?? groupsBase;
     setConfigGroups(updated);
-    setSelections((prev) => mergeSelectionsAfterKonfigResponse(prev, updated));
+    setSelections((prev) => {
+      const merged = mergeSelectionsAfterKonfigResponse(
+        prev,
+        updated,
+        validity === false
+      );
+      return pruneSelectionsForHiddenRows(updated.slice(1), merged);
+    });
   };
 
   /**
@@ -1160,17 +1224,17 @@ export default function ConfigStep({
       eigenschaftwert: { "1601": "", "1602": "" },
       artical_number: articalNumber,
       data_file_exist: "1",
-      mir_type: "square",
-      str_type: "xside",
-      mir_model: "comfort",
-      str_widt: "30",
-      str_vert_bside: "40",
-      str_vert_top: "60",
-      str_vert_btm: "60",
-      str_hori_bside: "0",
-      str_hori_top: "0",
-      str_hori_btm: "0",
-      shining_sid: "no",
+      mir_type: productLightingPayload?.mir_type ?? "square",
+      str_type: productLightingPayload?.str_type ?? "xside",
+      mir_model: productLightingPayload?.mir_model ?? "comfort",
+      str_widt: productLightingPayload?.str_widt ?? "30",
+      str_vert_bside: productLightingPayload?.str_vert_bside ?? "40",
+      str_vert_top: productLightingPayload?.str_vert_top ?? "60",
+      str_vert_btm: productLightingPayload?.str_vert_btm ?? "60",
+      str_hori_bside: productLightingPayload?.str_hori_bside ?? "0",
+      str_hori_top: productLightingPayload?.str_hori_top ?? "0",
+      str_hori_btm: productLightingPayload?.str_hori_btm ?? "0",
+      shining_sid: productLightingPayload?.shining_sid ?? "no",
       item,
       customSizeConfigItem: String(customSizeConfigItem),
       customSizeConfigGroup: String(customSizeConfigGroup),
@@ -1202,6 +1266,8 @@ export default function ConfigStep({
     emitSummIfExists(buildData);
 
     applyKonfigValidityWarning(buildData, setConfigApiWarning);
+    const validity = getKonfigValidity(buildData);
+    if (typeof validity === "boolean") setLastKonfigValid(validity);
 
     const newGroups = parseResponseFromVarAssigns(buildData);
     if (!newGroups) {
@@ -1212,12 +1278,17 @@ export default function ConfigStep({
     /* Одразу з відповіді buildConfiguration: новий список груп + узгоджений вибір → перерендер селектів */
     const mergedAfterBuild = mergeSelectionsAfterKonfigResponse(
       nextSelections,
-      newGroups
+      newGroups,
+      validity === false
+    );
+    const prunedAfterBuild = pruneSelectionsForHiddenRows(
+      newGroups.slice(1),
+      mergedAfterBuild
     );
     setConfigGroups([...newGroups]);
-    setSelections(mergedAfterBuild);
+    setSelections(prunedAfterBuild);
 
-    await executeLoadKonfig(mergedAfterBuild, newGroups);
+    await executeLoadKonfig(prunedAfterBuild, newGroups);
   };
 
   const handleSingleSelectChange = (groupIdx: number, itemId: number) => {
@@ -1254,9 +1325,10 @@ export default function ConfigStep({
           ? { ...g, selectedItemIds: itemId ? [itemId] : [] }
           : g
       );
-      onSelectionChange?.(next);
-      void buildConfigurationThenLoadKonfig(next);
-      return next;
+      const pruned = pruneSelectionsForHiddenRows(optionGroups, next);
+      onSelectionChange?.(pruned);
+      void buildConfigurationThenLoadKonfig(pruned);
+      return pruned;
     });
   };
 
@@ -1278,9 +1350,10 @@ export default function ConfigStep({
         }
         return { ...g, selectedItemIds: newIds };
       });
-      onSelectionChange?.(next);
-      void buildConfigurationThenLoadKonfig(next);
-      return next;
+      const pruned = pruneSelectionsForHiddenRows(optionGroups, next);
+      onSelectionChange?.(pruned);
+      void buildConfigurationThenLoadKonfig(pruned);
+      return pruned;
     });
   };
 
@@ -1304,7 +1377,9 @@ export default function ConfigStep({
     if (lastSentSizeKeyRef.current === sizeKey) return;
 
     lastSentSizeKeyRef.current = sizeKey;
-    void buildConfigurationThenLoadKonfig(selections);
+    void buildConfigurationThenLoadKonfig(
+      pruneSelectionsForHiddenRows(optionGroups, selections)
+    );
   }, [
     widthMmFromStep1,
     heightMmFromStep1,

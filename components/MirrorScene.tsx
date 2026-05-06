@@ -30,7 +30,14 @@ export interface MirrorSceneProps {
   hygieneMirrorCorner?: "bottom-left" | "bottom-right"; // Position des Hygienespiegels
   cameraView?: "top" | "left" | "right" | "front"; // Kamera-Ansicht
   showDimensions?: boolean; // Розміри зеркала показувати
-  lightingMode?: "none" | "sides" | "frame" | "top-sides"; // Schema der Leuchtstreifen
+  lightingMode?:
+    | "none"
+    | "sides"
+    | "top"
+    | "top-bottom"
+    | "top-sides"
+    | "around"
+    | "frame"; // Schema der Leuchtstreifen
   lightTemperatureK?: number;
   ambientBacklightMode?:
     | "none"
@@ -46,6 +53,9 @@ export interface MirrorSceneProps {
     vertSideOffsetMm: number;
     vertTopOffsetMm: number;
     vertBottomOffsetMm: number;
+    horiSideOffsetMm: number;
+    horiTopInsetMm: number;
+    horiBottomInsetMm: number;
   };
 }
 
@@ -1211,7 +1221,14 @@ function MirrorObject({
   widthMm: number;
   heightMm: number;
   showroomLight: boolean;
-  lightingMode?: "none" | "sides" | "frame" | "top-sides";
+  lightingMode?:
+    | "none"
+    | "sides"
+    | "top"
+    | "top-bottom"
+    | "top-sides"
+    | "around"
+    | "frame";
   lightTemperatureK?: number;
   ambientBacklightMode?:
     | "none"
@@ -1227,6 +1244,9 @@ function MirrorObject({
     vertSideOffsetMm: number;
     vertTopOffsetMm: number;
     vertBottomOffsetMm: number;
+    horiSideOffsetMm: number;
+    horiTopInsetMm: number;
+    horiBottomInsetMm: number;
   };
 }) {
   const width = widthMm * MM_TO_M;
@@ -1354,6 +1374,9 @@ function MirrorObject({
     const sideOffsetX = (lightingConfig?.vertSideOffsetMm ?? 40) * MM_TO_M;
     const edgeOffsetYTop = (lightingConfig?.vertTopOffsetMm ?? 60) * MM_TO_M;
     const edgeOffsetYBottom = (lightingConfig?.vertBottomOffsetMm ?? 60) * MM_TO_M;
+    const horizontalEdgeOffset = (lightingConfig?.horiSideOffsetMm ?? 0) * MM_TO_M;
+    const topStripSideInset = (lightingConfig?.horiTopInsetMm ?? 0) * MM_TO_M;
+    const bottomStripSideInset = (lightingConfig?.horiBottomInsetMm ?? 0) * MM_TO_M;
     const stripDepth = 0.002;
     const renderStripMaterial = () => {
       if (showroomLight) {
@@ -1421,10 +1444,10 @@ function MirrorObject({
         );
       };
 
-      const addHorizontalStrip = (y: number) => {
-        const stripLength = Math.max(0.001, width - sideOffsetX * 2);
+      const addHorizontalStrip = (y: number, sideInset: number, key: string) => {
+        const stripLength = Math.max(0.001, width - sideInset * 2);
         lightStrips.push(
-          <mesh key={`h-${y}`} position={[0, y, stripZ]}>
+          <mesh key={key} position={[0, y, stripZ]}>
             <boxGeometry args={[stripLength, stripWidth, stripDepth]} />
             {renderStripMaterial()}
           </mesh>
@@ -1432,7 +1455,11 @@ function MirrorObject({
       };
 
       // Seitenstreifen (links + rechts)
-      if (lightingMode === "sides" || lightingMode === "frame") {
+      if (
+        lightingMode === "sides" ||
+        lightingMode === "around" ||
+        lightingMode === "frame"
+      ) {
         const xLeft = -width / 2 + sideOffsetX + stripWidth / 2;
         const xRight = width / 2 - sideOffsetX - stripWidth / 2;
         addVerticalStrip(xLeft);
@@ -1440,9 +1467,20 @@ function MirrorObject({
       }
 
       // Obere Streifen je nach Schema
-      if (lightingMode === "frame") {
-        const yTop = height / 2 - edgeOffsetYTop - stripWidth / 2;
-        addHorizontalStrip(yTop);
+      if (
+        lightingMode === "top" ||
+        lightingMode === "top-bottom" ||
+        lightingMode === "around" ||
+        lightingMode === "frame"
+      ) {
+        const yTop = height / 2 - horizontalEdgeOffset - stripWidth / 2;
+        addHorizontalStrip(yTop, topStripSideInset, "h-top");
+      }
+
+      // Untere Streifen je nach Schema
+      if (lightingMode === "top-bottom" || lightingMode === "around") {
+        const yBottom = -height / 2 + horizontalEdgeOffset + stripWidth / 2;
+        addHorizontalStrip(yBottom, bottomStripSideInset, "h-bottom");
       }
     }
   }

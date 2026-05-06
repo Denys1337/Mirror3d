@@ -1,0 +1,11 @@
+script_1.js https://test.schreiber-design.com/templates/NOVA/js/jquery-3.7.1.min.js
+script_2.js https://test.schreiber-design.com/asset/jtl3.js?v=1.0.3
+script_3.js https://test.schreiber-design.com/asset/plugin_js_body?v=1.0.3
+script_4.js https://test.schreiber-design.com/templates/SchreiberSD/js/custom.js?v=1.0.3
+script_5.js https://test.schreiber-design.com/templates/NOVA/js/app/app.js
+script_6.js https://test.schreiber-design.com/plugins/sd_recalculate_prices/frontend//assets/select2/js/select2.min.js
+script_7.js https://test.schreiber-design.com/plugins/kk_dropper/drops/Shared/framework.js?v=100.19.11
+script_8.js https://cdn.plyr.io/3.8.3/plyr.js
+script_9.js https://apis.google.com/js/platform.js?onload=renderBadge
+script_10.js https://cdn.sitecockpit.com/cdn/app.js
+script_11.js https://test.schreiber-design.com/plugins/sd_configuration_loader/frontend/js/artikel.js?v=1.0.0

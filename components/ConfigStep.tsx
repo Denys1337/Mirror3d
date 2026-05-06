@@ -555,6 +555,13 @@ function parseAmbientBacklightModeFromLabel(
   return "all";
 }
 
+function isAmbientLightGroup(group: RawConfigGroup): boolean {
+  const title = plainLabelFromApi(group.oSprache?.cName ?? group.cKommentar ?? "")
+    .toLowerCase()
+    .replace(/\s+/g, "");
+  return title.includes("ambientelicht");
+}
+
 export default function ConfigStep({
   onSelectionChange,
   onSummChange,
@@ -1085,6 +1092,22 @@ export default function ConfigStep({
   ): GroupSelection[] =>
     updated.slice(1).map((group, index) => {
       if (group.bAktiv === false) {
+        // JTL can temporarily return Ambientelicht as inactive while keeping UI selectable;
+        // keep previous explicit selection to avoid losing rear backlight state.
+        if (isAmbientLightGroup(group)) {
+          const kept = prev.find((s) => s.groupIndex === index)?.selectedItemIds ?? [];
+          if (kept.length > 0) {
+            const existing = kept.filter((id) =>
+              group.oItem_arr.some((item) => item.kKonfigitem === id)
+            );
+            if (existing.length > 0) {
+              return {
+                groupIndex: index,
+                selectedItemIds: group.nMax === 1 ? [existing[0]] : existing,
+              };
+            }
+          }
+        }
         if (useFallbackForInvalid) {
           const kept = prev.find((s) => s.groupIndex === index)?.selectedItemIds;
           return { groupIndex: index, selectedItemIds: kept?.length ? kept : [] };

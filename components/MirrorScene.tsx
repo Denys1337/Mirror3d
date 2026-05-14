@@ -1,9 +1,56 @@
 "use client";
 
 import { Canvas, useThree, useFrame, ThreeEvent } from "@react-three/fiber";
-import { OrbitControls, MeshReflectorMaterial, Environment, useTexture, RoundedBox, useGLTF, Text } from "@react-three/drei";
-import { useRef, useState, useMemo, useEffect } from "react";
+import { OrbitControls, MeshReflectorMaterial, Environment, useTexture, RoundedBox, useGLTF, Text, useEnvironment } from "@react-three/drei";
+import { useRef, useState, useMemo, useEffect, useLayoutEffect } from "react";
 import * as THREE from "three";
+
+/** Відстань камери до orbit target (0, 1.1, 0) у фронтальному та бічних пресетах; раніше 6.75 — дзеркало виглядало дрібним. */
+const DEFAULT_CAMERA_DISTANCE = 3.75;
+
+/**
+ * Той самий HDR: сфера ззаду (відображення «далі») + scene.environment для IBL,
+ * щоб сцена не була плоскою без світла.
+ */
+function BathroomHdrBackdrop({ hdrRotation = 0 }: { hdrRotation?: number }) {
+  const map = useEnvironment({ files: "/images/modern_bathroom_4k.hdr" });
+  const gl = useThree((s) => s.gl);
+
+  useLayoutEffect(() => {
+    const maxA = gl.capabilities.getMaxAnisotropy();
+    if (maxA > 0) map.anisotropy = maxA;
+    map.minFilter = THREE.LinearFilter;
+    map.magFilter = THREE.LinearFilter;
+    map.needsUpdate = true;
+  }, [map, gl]);
+
+  const center: [number, number, number] = [0, 1.05, -16];
+  const radius = 36;
+
+  return (
+    <>
+      <Environment
+        map={map}
+        environmentIntensity={1}
+        environmentRotation={new THREE.Euler(0, hdrRotation, 0)}
+      />
+      <mesh
+        position={center}
+        rotation={[0, hdrRotation, 0]}
+        renderOrder={-100}
+        frustumCulled={false}
+      >
+        <sphereGeometry args={[radius, 72, 48]} />
+        <meshBasicMaterial
+          map={map}
+          side={THREE.BackSide}
+          toneMapped
+          depthWrite={false}
+        />
+      </mesh>
+    </>
+  );
+}
 
 export interface MirrorSceneProps {
   widthMm: number;
@@ -1759,11 +1806,11 @@ function CameraController({ view, controlsRef, showSocket, showTouchSensor, show
       const direction = new THREE.Vector3().subVectors(startPosition, target).normalize();
       endPosition = new THREE.Vector3().addVectors(target, direction.multiplyScalar(newDistance));
     } else {
-      // Віддаляємо камеру назад до початкової позиції (відстань 6.75)
-      const defaultDistance = 6.75;
+      // Віддаляємо камеру назад до типової дистанції перегляду
+      const defaultDistance = DEFAULT_CAMERA_DISTANCE;
       const direction = new THREE.Vector3().subVectors(startPosition, target).normalize();
       // Якщо камера вже близько, використовуємо стандартний напрямок
-      if (startPosition.distanceTo(target) < 4) {
+      if (startPosition.distanceTo(target) < defaultDistance + 0.5) {
         endPosition = new THREE.Vector3(defaultDistance, 1.1, 0);
       } else {
         endPosition = new THREE.Vector3().addVectors(target, direction.multiplyScalar(defaultDistance));
@@ -1827,40 +1874,35 @@ function CameraController({ view, controlsRef, showSocket, showTouchSensor, show
         // ТУТ ВПИСУЄТЬСЯ КУТ В ГРАДУСАХ (зараз 88° - майже вертикально вгору)
         const angleDegrees = 70;
         const angleRad = angleDegrees * (Math.PI / 180);
-        // Початкова позиція: [6.75, 1.1, 0], target: [0, 1.1, 0]
-        const distanceX = 6.75; // Відстань від target по X
+        const distanceX = DEFAULT_CAMERA_DISTANCE;
         const initialY = 1.1; // Висота target
         const newY = initialY + distanceX * Math.tan(angleRad);
-        newPosition = [6.75, newY, 0];
+        newPosition = [distanceX, newY, 0];
         break;
       case "left":
         // Повертаємо камеру на 54 градуси вліво від початкової позиції
-        // Початкова позиція: [6.75, 1.1, 0], target: [0, 1.1, 0]
-        // Відстань від target: 6.75
         const leftAngleDegrees = 70; // ТУТ ВПИСУЄТЬСЯ КУТ В ГРАДУСАХ
         const leftAngleRad = leftAngleDegrees * (Math.PI / 180);
-        const distance = 6.75; // Відстань від target
+        const distance = DEFAULT_CAMERA_DISTANCE;
         const leftX = distance * Math.cos(leftAngleRad);
         const leftZ = distance * Math.sin(leftAngleRad);
         newPosition = [leftX, 1.1, leftZ];
         break;
       case "right":
         // Повертаємо камеру на 70 градусів вправо від початкової позиції
-        // Початкова позиція: [6.75, 1.1, 0], target: [0, 1.1, 0]
-        // Відстань від target: 6.75
         const rightAngleDegrees = 70; // ТУТ ВПИСУЄТЬСЯ КУТ В ГРАДУСАХ
         const rightAngleRad = rightAngleDegrees * (Math.PI / 180);
-        const rightDistance = 6.75; // Відстань від target
+        const rightDistance = DEFAULT_CAMERA_DISTANCE;
         const rightX = rightDistance * Math.cos(rightAngleRad);
         const rightZ = -rightDistance * Math.sin(rightAngleRad); // Мінус для обертання вправо
         newPosition = [rightX, 1.1, rightZ];
         break;
       case "front":
         // Повертаємо камеру до початкової позиції
-        newPosition = [6.75, 1.1, 0];
+        newPosition = [DEFAULT_CAMERA_DISTANCE, 1.1, 0];
         break;
       default:
-        newPosition = [6.75, 1.1, 0];
+        newPosition = [DEFAULT_CAMERA_DISTANCE, 1.1, 0];
     }
 
     // Плавна анімація переміщення камери
@@ -1955,7 +1997,7 @@ export default function MirrorScene({
   return (
     <Canvas
       shadows
-      camera={{ position: [6.75, 1.1, 0], fov: 40 }}
+      camera={{ position: [DEFAULT_CAMERA_DISTANCE, 1.1, 0], fov: 40 }}
       gl={{ toneMappingExposure: 3.5 }}
     >
       <color attach="background" args={["#ffffff"]} />
@@ -2043,15 +2085,11 @@ export default function MirrorScene({
         </group>
       )}
 
-      {/* HDR ванної для відображення в дзеркалі - можна обертати через hdrRotation */}
-      <group rotation={[0, hdrRotation, 0]}>
-        <Environment files="/images/modern_bathroom_4k.hdr" blur={0} />
-      </group>
-
-      <group 
-        rotation={[0, Math.PI - Math.PI / 2, 0]} 
+      <group
+        rotation={[0, Math.PI - Math.PI / 2, 0]}
         position={[0, 0.9, 0]}
       >
+        <BathroomHdrBackdrop hdrRotation={hdrRotation} />
         <Wall visible={showWall} />
         <MirrorObject
           widthMm={widthMm}

@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import "bootstrap/dist/css/bootstrap.min.css";
+import "./jtl-bootstrap-compat.css";
 import "./globals.css";
 
 export const metadata = {

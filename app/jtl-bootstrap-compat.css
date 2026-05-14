@@ -1,0 +1,37 @@
+/**
+ * JTL option HTML is often authored for Bootstrap 3.
+ * We ship Bootstrap 5; map a few legacy class names used in Schreiber fragments.
+ * Scope to the option-info popup to avoid surprising the rest of the UI.
+ */
+.jtl-option-html-inline .btn-default {
+  color: #333;
+  background-color: #fff;
+  border-color: #ccc;
+}
+.jtl-option-html-inline .btn-default:hover {
+  color: #333;
+  background-color: #e6e6e6;
+  border-color: #adadad;
+}
+.jtl-option-html-inline .pull-right {
+  float: right !important;
+}
+.jtl-option-html-inline .pull-left {
+  float: left !important;
+}
+.jtl-option-html-inline .img-responsive {
+  max-width: 100%;
+  height: auto;
+}
+.jtl-option-html-inline .text-left {
+  text-align: left !important;
+}
+.jtl-option-html-inline .text-right {
+  text-align: right !important;
+}
+
+/* JTL/featherlight кнопки закриття в контенті — дублюють наш тулбар у попапі */
+.jtl-option-html-inline .featherlight-close.btn-closemodal-sticky,
+.jtl-option-html-inline .featherlight-close.btn-closemodal {
+  display: none !important;
+}

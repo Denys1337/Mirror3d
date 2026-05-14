@@ -114,8 +114,14 @@ function stripBlockingMetaPolicies(html: string): string {
     );
 }
 
-/** Щоб контент JTL не роздував документ у iframe → горизонтальний скрол у попапі. */
+/** У повній сторінці (iframe) — як у браузера. */
 const NO_HORIZONTAL_SCROLL_STYLE = `<style data-mirror3d-opt>html{overflow-x:hidden;max-width:100%;}body{max-width:100%!important;overflow-x:hidden!important;box-sizing:border-box;margin:0;}img,iframe,video,svg{max-width:100%!important;height:auto!important;}table{max-width:100%;display:block;overflow-x:auto;}pre{max-width:100%;overflow-x:auto;white-space:pre-wrap;word-break:break-word;}</style>`;
+
+/**
+ * У фрагменті HTML уставляється в div.jtl-option-html-inline — правила для html/body не працюють
+ * і не повинні глобально перебивати Bootstrap у застосунку.
+ */
+const NO_HORIZONTAL_SCROLL_FRAGMENT_STYLE = `<style data-mirror3d-opt>.jtl-option-html-inline{overflow-x:hidden;max-width:100%;box-sizing:border-box;}.jtl-option-html-inline img,.jtl-option-html-inline iframe,.jtl-option-html-inline video,.jtl-option-html-inline svg{max-width:100%!important;height:auto!important;}.jtl-option-html-inline table{max-width:100%;display:block;overflow-x:auto;}.jtl-option-html-inline pre{max-width:100%;overflow-x:auto;white-space:pre-wrap;word-break:break-word;}</style>`;
 
 const GRID_FALLBACK_STYLE = `<style data-mirror3d-grid-fallback>
 *,*::before,*::after{box-sizing:border-box;}
@@ -139,18 +145,32 @@ const ICON_FALLBACK_STYLE = `<style data-mirror3d-icon-fallback>
 .pull-left{float:left;margin-right:.3em;}
 </style>`;
 
-function injectNoHorizontalScroll(html: string): string {
+/** Тільки для fragment=1 — усі селектори під .jtl-option-html-inline, щоб не ламати Bootstrap у всьому додатку. */
+const ICON_FALLBACK_FRAGMENT_STYLE = `<style data-mirror3d-icon-fallback>
+.jtl-option-html-inline .fa{display:inline-block;line-height:1;font-style:normal;}
+.jtl-option-html-inline .fa-search::before{content:"🔍" !important;}
+.jtl-option-html-inline .fa-info-circle::before{content:"ℹ";}
+.jtl-option-html-inline .fa-file-pdf-o::before{content:"📄";}
+.jtl-option-html-inline .fa-fw{display:inline-flex;align-items:center;justify-content:center;min-width:1.25em;text-align:center;}
+.jtl-option-html-inline .pull-left{float:left;margin-right:.3em;}
+</style>`;
+
+function injectNoHorizontalScroll(html: string, fragment: boolean): string {
   if (/data-mirror3d-opt/.test(html)) return html;
+  const tag = fragment
+    ? NO_HORIZONTAL_SCROLL_FRAGMENT_STYLE
+    : NO_HORIZONTAL_SCROLL_STYLE;
   if (/<head[^>]*>/i.test(html)) {
-    return html.replace(
-      /<head[^>]*>/i,
-      (m) => `${m}${NO_HORIZONTAL_SCROLL_STYLE}`
-    );
+    return html.replace(/<head[^>]*>/i, (m) => `${m}${tag}`);
   }
-  return `${NO_HORIZONTAL_SCROLL_STYLE}${html}`;
+  return `${tag}${html}`;
 }
 
-function injectGridFallback(html: string): string {
+function injectGridFallback(html: string, fragment: boolean): string {
+  if (fragment) {
+    /* Bootstrap 5 уже в layout; старий fallback перебивав .row/.container глобально. */
+    return html;
+  }
   if (/data-mirror3d-grid-fallback/.test(html)) return html;
   if (/<head[^>]*>/i.test(html)) {
     return html.replace(/<head[^>]*>/i, (m) => `${m}${GRID_FALLBACK_STYLE}`);
@@ -158,12 +178,70 @@ function injectGridFallback(html: string): string {
   return `${GRID_FALLBACK_STYLE}${html}`;
 }
 
-function injectIconFallback(html: string): string {
+function injectIconFallback(html: string, fragment: boolean): string {
   if (/data-mirror3d-icon-fallback/.test(html)) return html;
+  const tag = fragment ? ICON_FALLBACK_FRAGMENT_STYLE : ICON_FALLBACK_STYLE;
   if (/<head[^>]*>/i.test(html)) {
-    return html.replace(/<head[^>]*>/i, (m) => `${m}${ICON_FALLBACK_STYLE}`);
+    return html.replace(/<head[^>]*>/i, (m) => `${m}${tag}`);
   }
-  return `${ICON_FALLBACK_STYLE}${html}`;
+  return `${tag}${html}`;
+}
+
+function stripBaseTags(html: string): string {
+  return html.replace(/<base\b[^>]*>/gi, "");
+}
+
+/** Без <base> у фрагменті відносні URL мають резолвитись відносно самого option_*.html на JTL. */
+function needsAbsolutizeResourceUrl(url: string): boolean {
+  const t = url.trim();
+  if (!t) return false;
+  if (/^(https?:|data:|blob:|mailto:|tel:|about:|#)/i.test(t)) return false;
+  if (/^javascript:/i.test(t)) return false;
+  return true;
+}
+
+function toAbsoluteResourceUrl(url: string, documentUrl: string): string {
+  try {
+    return new URL(url, documentUrl).href;
+  } catch {
+    return url;
+  }
+}
+
+function absolutizeSrcsetValue(val: string, documentUrl: string): string {
+  return val
+    .split(",")
+    .map((part) => {
+      const trimmed = part.trim();
+      if (!trimmed) return part;
+      const spaceIdx = trimmed.search(/\s+/);
+      const urlPart = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
+      const rest = spaceIdx === -1 ? "" : trimmed.slice(spaceIdx);
+      if (!needsAbsolutizeResourceUrl(urlPart)) return trimmed;
+      return `${toAbsoluteResourceUrl(urlPart, documentUrl)}${rest}`;
+    })
+    .join(", ");
+}
+
+/**
+ * Фрагмент вставляється в Next-додаток: відносні src/href мають стати абсолютними на JTL.
+ */
+function absolutizeResourceUrlsInFragment(
+  html: string,
+  documentUrl: string
+): string {
+  let out = html.replace(
+    /\b(srcset|data-srcset)=(["'])([^"']*)\2/gi,
+    (_full, name: string, q: string, val: string) =>
+      `${name}=${q}${absolutizeSrcsetValue(val, documentUrl)}${q}`
+  );
+  const attrRe =
+    /\b(src|href|poster|data-src)=(["'])([^"']*)\2/gi;
+  out = out.replace(attrRe, (full, name: string, q: string, val: string) => {
+    if (!needsAbsolutizeResourceUrl(val)) return full;
+    return `${name}=${q}${toAbsoluteResourceUrl(val, documentUrl)}${q}`;
+  });
+  return out;
 }
 
 export async function GET(
@@ -292,20 +370,27 @@ export async function GET(
     .filter((x) => x && x.trim().length > 0)
     .join("\n");
   const cssBundle = rewriteCssUrlsToAbsolute(rawCssBundle);
+  const withBase = asFragment ? html : injectBaseTag(html, JTL_ORIGIN);
   html = injectGridFallback(
     injectIconFallback(
       injectNoHorizontalScroll(
-        injectExternalCss(injectBaseTag(html, JTL_ORIGIN), cssBundle)
-      )
-    )
+        injectExternalCss(withBase, cssBundle),
+        asFragment
+      ),
+      asFragment
+    ),
+    asFragment
   );
 
   if (asFragment) {
     const headMatch = html.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
     const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-    const head = headMatch?.[1] ?? "";
+    const head = stripBaseTags(headMatch?.[1] ?? "");
     const body = bodyMatch?.[1] ?? html;
-    const fragment = `${head}\n${body}`;
+    const fragment = absolutizeResourceUrlsInFragment(
+      `${head}\n${body}`,
+      upstreamUrl
+    );
     return new NextResponse(fragment, {
       status: 200,
       headers: {

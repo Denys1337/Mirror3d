@@ -1478,6 +1478,34 @@ main.app-root {
   margin-top: 6px;
 }
 
+/* Додаткові селекти (з’являються після залежного вибору) */
+.controls-panel .config-jtl-compact .jtl-config-additional-prompt {
+  display: block;
+  width: 100%;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: rgba(228, 39, 39, 1);
+  white-space: normal;
+}
+
+.controls-panel .config-jtl-compact .jtl-config-additional .jtl-config-additional-row {
+  width: 100%;
+}
+
+.controls-panel .config-jtl-compact .jtl-config-additional .dimension-manual-input-wrapper,
+.controls-panel .config-jtl-compact .jtl-config-additional .jtl-config-select-shell {
+  flex: 1 1 100%;
+  width: 100%;
+  max-width: 100%;
+  box-shadow: 0px 0px 8px 2px rgba(245, 158, 11, 0.5);
+}
+
+.controls-panel .config-jtl-compact .jtl-config-additional .jtl-options-multiselect {
+  width: 100%;
+  box-shadow: 0px 0px 8px 2px rgba(245, 158, 11, 0.5);
+}
+
 .controls-panel .config-jtl-compact .jtl-options-multiselect {
   width: 100%;
   padding: 10px 12px;

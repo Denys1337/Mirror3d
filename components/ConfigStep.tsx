@@ -315,6 +315,20 @@ const SCHALTER509_AKTIVIERT_432 = new Set<number>([2557, 2558]);
 /** Після вибору в «Uhr / Wetterstation» з’являються Position der Anzeige (428) та Anschluss (396). */
 const DEFERRED_AFTER_UHR_GRUPPEN = new Set<number>([428, 396]);
 
+/** Додаткові селекти, що з’являються після вибору в батьківській групі. */
+function isAdditionalConfigGroup(kKonfiggruppe: number | undefined): boolean {
+  if (kKonfiggruppe == null) return false;
+  return (
+    DEFERRED_KONFIG_GRUPPE_IDS.has(kKonfiggruppe) ||
+    DEFERRED_AFTER_UHR_GRUPPEN.has(kKonfiggruppe)
+  );
+}
+
+function additionalSelectPrompt(groupTitle: string): string {
+  const title = groupTitle.trim() || "Option";
+  return `Bitte wählen Sie die ${title}`;
+}
+
 /**
  * Варіанти Befestigung «montiert» / спец. — на оригіналі під ними часто з’являється «Optionale Montagelösung» (476).
  */
@@ -1524,34 +1538,60 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
           const rowKey = `${idx}-${group.kKonfiggruppe ?? "g"}-${aktivSig || "na"}`;
 
           const kg = group.kKonfiggruppe;
+          const isAdditional = isAdditionalConfigGroup(kg);
+          const hasSelection = isSingleChoice
+            ? (selectedIds[0] ?? 0) > 0
+            : selectedIds.length > 0;
+          const showAdditionalPrompt = isAdditional && !hasSelection;
 
           return (
-            <div className="dimension-group jtl-config-group" key={rowKey}>
-              <div className="dimension-header jtl-config-header-label-only">
-                {kg != null ? (
-                  <button
-                    type="button"
-                    className="info-icon jtl-option-info-trigger"
-                    aria-label={
-                      groupTitle
-                        ? `Infoseite: ${groupTitle}`
-                        : "Infoseite zur Option"
+            <div
+              className={
+                "dimension-group jtl-config-group" +
+                (isAdditional ? " jtl-config-additional" : "")
+              }
+              key={rowKey}
+            >
+              {showAdditionalPrompt || !isAdditional ? (
+                <div className="dimension-header jtl-config-header-label-only">
+                  {kg != null && !isAdditional ? (
+                    <button
+                      type="button"
+                      className="info-icon jtl-option-info-trigger"
+                      aria-label={
+                        groupTitle
+                          ? `Infoseite: ${groupTitle}`
+                          : "Infoseite zur Option"
+                      }
+                      aria-haspopup="dialog"
+                      onClick={() => {
+                        setSingleOpenGroupIdx(null);
+                        setOptionInfoPopup(kg);
+                      }}
+                    >
+                      i
+                    </button>
+                  ) : null}
+                  <span
+                    className={
+                      showAdditionalPrompt
+                        ? "jtl-config-additional-prompt"
+                        : "dimension-label jtl-config-field-label"
                     }
-                    aria-haspopup="dialog"
-                    onClick={() => {
-                      setSingleOpenGroupIdx(null);
-                      setOptionInfoPopup(kg);
-                    }}
                   >
-                    i
-                  </button>
-                ) : null}
-                <span className="dimension-label jtl-config-field-label">
-                  {groupTitle || "Option"}
-                </span>
-              </div>
+                    {showAdditionalPrompt
+                      ? additionalSelectPrompt(groupTitle)
+                      : groupTitle || "Option"}
+                  </span>
+                </div>
+              ) : null}
               {isSingleChoice ? (
-                <div className="dimension-manual-row jtl-config-inline-row">
+                <div
+                  className={
+                    "dimension-manual-row jtl-config-inline-row" +
+                    (isAdditional ? " jtl-config-additional-row" : "")
+                  }
+                >
                   <div className="dimension-manual-input-wrapper jtl-config-select-shell jtl-config-select-shell--grow">
                     <div
                       className="jtl-single-select-root"
@@ -1652,7 +1692,12 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
                   </div>
                 </div>
               ) : (
-                <div className="dimension-manual-row jtl-config-inline-row jtl-config-multiselect-block">
+                <div
+                  className={
+                    "dimension-manual-row jtl-config-inline-row jtl-config-multiselect-block" +
+                    (isAdditional ? " jtl-config-additional-row" : "")
+                  }
+                >
                   <div className="options-multiselect jtl-options-multiselect jtl-options-multiselect--grow">
                     {group.oItem_arr.map((item) => {
                       const checked = selectedIds.includes(

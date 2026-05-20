@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { resolveProductIds } from "../../../lib/productIds";
+import { parseMirrorUrlParams, resolveSizeKonfigItem } from "../../../lib/urlParams";
 
 export const runtime = "nodejs";
 
@@ -104,17 +106,28 @@ function extractSetCookieHeaders(res: Response): string[] {
 const DEFAULT_JTL_TOKEN =
   "6c08e5033bc977face39247c0d040e8c354c5038509611843a135f4014ca78fe";
 
-function buildBuildConfigurationIoBody(token: string, productId: string): string {
+function cookieFromSid(sid: string | null | undefined): string | null {
+  const s = sid?.trim();
+  if (!s) return null;
+  return `JTLSHOP=${s}`;
+}
+
+function buildBuildConfigurationIoBody(
+  token: string,
+  artikelId: string,
+  articalNumber: string,
+  sizeKonfigItem: string
+): string {
   const params = {
     jtl_token: token,
     inWarenkorb: "1",
-    a: productId,
+    a: artikelId,
     wke: "1",
     show: "1",
     kKundengruppe: "3",
     kSprache: "1",
     eigenschaftwert: { "1601": "", "1602": "" },
-    artical_number: productId,
+    artical_number: articalNumber,
     data_file_exist: "1",
     mir_type: "square",
     str_type: "xside",
@@ -128,12 +141,12 @@ function buildBuildConfigurationIoBody(token: string, productId: string): string
     str_hori_btm: "0",
     shining_sid: "no",
     item: {
-      "249": { "0": "1155" },
+      "249": { "0": sizeKonfigItem },
       "261": { "0": "1215" },
       "288": { "0": "2584" },
       "363": { "0": "1838" },
     },
-    customSizeConfigItem: "1155",
+    customSizeConfigItem: sizeKonfigItem,
     customSizeConfigGroup: "249",
     breite: "400",
     hoehe: "400",
@@ -152,15 +165,22 @@ function buildBuildConfigurationIoBody(token: string, productId: string): string
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
-    const tokenParam = url.searchParams.get("jtl_token");
-    const idParam = url.searchParams.get("id")?.trim();
+    const urlParams = parseMirrorUrlParams(url.searchParams);
     const token =
-      tokenParam?.trim() ||
+      urlParams.jtlToken ||
       readEnvTrim("JTL_TOKEN") ||
       DEFAULT_JTL_TOKEN;
-    const productId = idParam && /^\d+$/.test(idParam) ? idParam : "17406";
+    const { artikelId, articalNumber } = resolveProductIds(
+      urlParams.artikelId,
+      urlParams.articalNumber
+    );
+    const sizeKonfigItem = resolveSizeKonfigItem(urlParams);
 
-    const outboundCookie = remoteCookieHeader;
+    const sidCookie = cookieFromSid(urlParams.sessionId);
+    const outboundCookie =
+      remoteCookieHeader ||
+      readEnvTrim("JTL_COOKIE") ||
+      sidCookie;
     const cookieStats = cookieHeaderStats(outboundCookie);
 
     const res = await fetch(IO_ENDPOINT, {
@@ -173,7 +193,12 @@ export async function GET(req: Request) {
         ...BROWSER_LIKE_HEADERS,
         ...(outboundCookie ? { Cookie: outboundCookie } : {}),
       },
-      body: buildBuildConfigurationIoBody(token, productId),
+      body: buildBuildConfigurationIoBody(
+        token,
+        artikelId,
+        articalNumber,
+        sizeKonfigItem
+      ),
     });
 
     if (!res.ok) {

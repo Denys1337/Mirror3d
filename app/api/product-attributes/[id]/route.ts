@@ -1,46 +1,51 @@
 import { NextResponse } from "next/server";
+import { jtlFetch } from "../../../../lib/jtlFetch";
 
 export const runtime = "nodejs";
 
-const BASE_URL =
-  "https://www.schreiber-design.com/templates/SchreiberSD/product_attributes";
+const JTL_ORIGIN = "https://test.schreiber-design.com";
+const BASE_URL = `${JTL_ORIGIN}/templates/SchreiberSD/product_attributes`;
 
 export async function GET(
   _req: Request,
   context: { params: { id: string } }
 ) {
-  try {
-    const rawId = context.params.id?.trim() || "";
-    if (!/^\d+$/.test(rawId)) {
-      return NextResponse.json({ error: "Invalid product id" }, { status: 400 });
-    }
+  const rawId = context.params.id?.trim() || "";
+  if (!/^\d+$/.test(rawId)) {
+    return NextResponse.json({ error: "Invalid product id" }, { status: 400 });
+  }
 
-    const remoteUrl = `${BASE_URL}/${rawId}.json`;
-    const remoteRes = await fetch(remoteUrl, {
+  const remoteUrl = `${BASE_URL}/${rawId}.json`;
+
+  try {
+    const remoteRes = await jtlFetch(remoteUrl, {
       headers: {
         Accept: "application/json,text/plain,*/*",
+        Referer: `${JTL_ORIGIN}/spiegel/p/badspiegel-comfort-side-ledplus`,
+        Origin: JTL_ORIGIN,
       },
-      cache: "no-store",
     });
 
     if (!remoteRes.ok) {
       return NextResponse.json(
-        { error: "Failed to fetch product attributes", status: remoteRes.status },
+        {
+          error: "Failed to fetch product attributes",
+          status: remoteRes.status,
+          url: remoteUrl,
+        },
         { status: 502 }
       );
     }
 
     const payload = await remoteRes.json();
     return NextResponse.json(payload, {
-      headers: {
-        "x-product-attributes-url": remoteUrl,
-      },
+      headers: { "x-product-attributes-url": remoteUrl },
     });
   } catch (error) {
-    console.error("Failed to fetch product attributes", error);
+    console.error("Failed to fetch product attributes", remoteUrl, error);
     return NextResponse.json(
-      { error: "Failed to fetch product attributes" },
-      { status: 500 }
+      { error: "Failed to fetch product attributes", url: remoteUrl },
+      { status: 502 }
     );
   }
 }

@@ -1,9 +1,15 @@
 "use client";
 
-import { useState, useEffect, useMemo, Suspense } from "react";
+import { useState, useEffect, useMemo, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import MirrorScene from "../components/MirrorScene";
-import ConfigStep from "../components/ConfigStep";
+import ConfigStep, { type ConfigStepHandle } from "../components/ConfigStep";
+import { resolveProductAttributesId } from "../lib/productIds";
+import {
+  parseProductLightingPayload,
+  type ProductLightingPayload,
+} from "../lib/productLighting";
+import { parseMirrorUrlParams } from "../lib/urlParams";
 
 const MIN_MM = 400;
 const MAX_MM = 2800;
@@ -16,20 +22,6 @@ type LightingConfig = {
   horiSideOffsetMm: number;
   horiTopInsetMm: number;
   horiBottomInsetMm: number;
-};
-
-type ProductLightingPayload = {
-  mir_type: string;
-  str_type: string;
-  mir_model: string;
-  str_widt: string;
-  str_vert_bside: string;
-  str_vert_top: string;
-  str_vert_btm: string;
-  str_hori_bside: string;
-  str_hori_top: string;
-  str_hori_btm: string;
-  shining_sid: string;
 };
 
 type AmbientBacklightMode =
@@ -126,9 +118,11 @@ const SIZE_LIMITS: Record<
 function HomePageContent() {
   const searchParams = useSearchParams();
 
-  // Значення з URL (?id=...&size=...)
-  const mirrorIdFromUrl = searchParams.get("id");
-  const mirrorSizeFromUrl = searchParams.get("size");
+  // URL: id=kArtikel, n=artical_number, s=size (kKonfigitem), t=token, sid=session
+  const urlParams = parseMirrorUrlParams(searchParams);
+  const mirrorIdFromUrl = urlParams.artikelId;
+  const mirrorArticalFromUrl = urlParams.articalNumber;
+  const mirrorSizeFromUrl = urlParams.sizeKonfigItem;
 
   const [mirrorId, setMirrorId] = useState<string | null>(null);
   const [mirrorSize, setMirrorSize] = useState<string | null>(null);
@@ -169,24 +163,15 @@ function HomePageContent() {
     horiBottomInsetMm: 0,
   });
   const [productLightingPayload, setProductLightingPayload] =
-    useState<ProductLightingPayload>({
-      mir_type: "square",
-      str_type: "xside",
-      mir_model: "comfort",
-      str_widt: "30",
-      str_vert_bside: "40",
-      str_vert_top: "60",
-      str_vert_btm: "60",
-      str_hori_bside: "0",
-      str_hori_top: "0",
-      str_hori_btm: "0",
-      shining_sid: "no",
-    });
+    useState<ProductLightingPayload | null>(null);
   const [showShelf, setShowShelf] = useState(false);
   const [shelfLengthMm, setShelfLengthMm] = useState(800);
   const [activeStep, setActiveStep] = useState<number>(1);
   const [jtlSumm, setJtlSumm] = useState<number | null>(null);
   const [stepRestored, setStepRestored] = useState(false);
+  const [cartLoading, setCartLoading] = useState(false);
+  const [cartError, setCartError] = useState<string | null>(null);
+  const configStepRef = useRef<ConfigStepHandle>(null);
 
   // Restore step after mount (avoid SSR/client hydration mismatch).
   useEffect(() => {
@@ -236,7 +221,10 @@ function HomePageContent() {
   }, [mirrorIdFromUrl, mirrorSizeFromUrl]);
 
   useEffect(() => {
-    const productId = mirrorIdFromUrl?.trim() || "23582";
+    const productId = resolveProductAttributesId(
+      mirrorIdFromUrl,
+      mirrorArticalFromUrl
+    );
 
     const parseMm = (value: unknown, fallback: number): number => {
       const parsed = Number(value);
@@ -259,39 +247,37 @@ function HomePageContent() {
     const loadProductAttributes = async () => {
       try {
         const res = await fetch(`/api/product-attributes/${productId}`);
-        if (!res.ok) return;
+        if (!res.ok) {
+          setProductLightingPayload(null);
+          return;
+        }
         const data = (await res.json()) as Record<string, unknown>;
+        const parsed = parseProductLightingPayload(data);
+        if (!parsed) {
+          console.warn("product-attributes: incomplete JSON", productId);
+          setProductLightingPayload(null);
+          return;
+        }
 
-        setProductLightingPayload({
-          mir_type: String(data.mir_type ?? "square"),
-          str_type: String(data.str_type ?? "xside"),
-          mir_model: String(data.mir_model ?? "comfort"),
-          str_widt: String(data.str_widt ?? "30"),
-          str_vert_bside: String(data.str_vert_bside ?? "40"),
-          str_vert_top: String(data.str_vert_top ?? "60"),
-          str_vert_btm: String(data.str_vert_btm ?? "60"),
-          str_hori_bside: String(data.str_hori_bside ?? "0"),
-          str_hori_top: String(data.str_hori_top ?? "0"),
-          str_hori_btm: String(data.str_hori_btm ?? "0"),
-          shining_sid: String(data.shining_sid ?? "no"),
-        });
-        setLightingMode(mapLightingMode(data.str_type));
+        setProductLightingPayload(parsed);
+        setLightingMode(mapLightingMode(parsed.str_type));
         setLightingConfig({
-          stripWidthMm: parseMm(data.str_widt, 30),
-          vertSideOffsetMm: parseMm(data.str_vert_bside, 40),
-          vertTopOffsetMm: parseMm(data.str_vert_top, 60),
-          vertBottomOffsetMm: parseMm(data.str_vert_btm, 60),
-          horiSideOffsetMm: parseMm(data.str_hori_bside, 0),
-          horiTopInsetMm: parseMm(data.str_hori_top, 0),
-          horiBottomInsetMm: parseMm(data.str_hori_btm, 0),
+          stripWidthMm: parseMm(parsed.str_widt, 30),
+          vertSideOffsetMm: parseMm(parsed.str_vert_bside, 40),
+          vertTopOffsetMm: parseMm(parsed.str_vert_top, 60),
+          vertBottomOffsetMm: parseMm(parsed.str_vert_btm, 60),
+          horiSideOffsetMm: parseMm(parsed.str_hori_bside, 0),
+          horiTopInsetMm: parseMm(parsed.str_hori_top, 0),
+          horiBottomInsetMm: parseMm(parsed.str_hori_btm, 0),
         });
       } catch (error) {
+        setProductLightingPayload(null);
         console.warn("Failed to load product attributes", error);
       }
     };
 
     loadProductAttributes();
-  }, [mirrorIdFromUrl]);
+  }, [mirrorIdFromUrl, mirrorArticalFromUrl]);
 
   // Preisberechnung
   const calculatePrice = () => {
@@ -1037,6 +1023,7 @@ function HomePageContent() {
           aria-hidden={!(activeStep >= 2 && activeStep <= 4)}
         >
           <ConfigStep
+            ref={configStepRef}
             widthMm={committedWidthMm}
             heightMm={committedHeightMm}
             onSummChange={setJtlSumm}
@@ -1069,12 +1056,39 @@ function HomePageContent() {
               </div>
             </div>
           </div>
+          {cartError ? (
+            <p className="text-danger small mb-2" role="alert">
+              {cartError}
+            </p>
+          ) : null}
           <button
             className="primary-cta-button"
             type="button"
-            onClick={() => setActiveStep((prev) => Math.min(5, prev + 1))}
+            disabled={cartLoading}
+            onClick={async () => {
+              if (activeStep < 5) {
+                setActiveStep((prev) => prev + 1);
+                return;
+              }
+              setCartError(null);
+              setCartLoading(true);
+              try {
+                await configStepRef.current?.addToCart();
+              } catch (e) {
+                const msg =
+                  e instanceof Error ? e.message : "Warenkorb fehlgeschlagen";
+                setCartError(msg);
+                console.error("addToCart", e);
+              } finally {
+                setCartLoading(false);
+              }
+            }}
           >
-            Weiter
+            {cartLoading
+              ? "Wird hinzugefügt…"
+              : activeStep === 5
+                ? "In den Warenkorb"
+                : "Weiter"}
             <span className="primary-cta-arrow">
               <img src="/images/arrowButton.svg" alt="" />
             </span>

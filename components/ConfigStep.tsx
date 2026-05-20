@@ -1,7 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
+import { buildAddToCartRequestBody } from "../lib/cartPayload";
+import type { AddToCartResponse } from "../lib/cartPayload";
+import type { ProductLightingPayload } from "../lib/productLighting";
+import {
+  buildConfigApiPath,
+  parseMirrorUrlParams,
+  resolveProductIdsFromUrlParams,
+} from "../lib/urlParams";
 
 type KonfigErrorEntry = { message?: string; group?: number };
 
@@ -104,6 +120,8 @@ type RawConfigGroup = {
 type RawConfigItem = {
   kKonfigitem: number;
   fPreis?: [number, number];
+  /** [0] Brutto (як на сайті), [1] Netto */
+  fPreisLocalized?: [string, string];
   cName: string;
   cBeschreibung?: string | null;
   cBildPfad?: string | null;
@@ -137,19 +155,12 @@ type Props = {
   widthMm?: number;
   heightMm?: number;
   activeStep?: number;
-  productLightingPayload?: {
-    mir_type: string;
-    str_type: string;
-    mir_model: string;
-    str_widt: string;
-    str_vert_bside: string;
-    str_vert_top: string;
-    str_vert_btm: string;
-    str_hori_bside: string;
-    str_hori_top: string;
-    str_hori_btm: string;
-    shining_sid: string;
-  };
+  /** З /api/product-attributes/{n} — без хардкоду в кошику / buildConfiguration */
+  productLightingPayload?: ProductLightingPayload | null;
+};
+
+export type ConfigStepHandle = {
+  addToCart: () => Promise<void>;
 };
 
 type StepGroupMap = {
@@ -197,10 +208,18 @@ function formatPriceEuro(value: number | undefined): string | null {
   return `${value.toFixed(2).replace(".", ",")} €`;
 }
 
+function optionDisplayPrice(item: RawConfigItem): string | null {
+  const localized = item.fPreisLocalized?.[0];
+  if (localized) {
+    const plain = plainLabelFromApi(localized);
+    if (plain) return plain;
+  }
+  return formatPriceEuro(item.fPreis?.[0]);
+}
+
 function optionLabel(item: RawConfigItem): string {
   const base = plainLabelFromApi(item.cName);
-  const p = item.fPreis?.[1];
-  const price = formatPriceEuro(p);
+  const price = optionDisplayPrice(item);
   if (!price) return base;
   // Nicht doppeln, falls Preis schon im cName steht
   if (base.includes("€") || base.includes(price.replace(/\s/g, ""))) return base;
@@ -225,37 +244,45 @@ function buildImageUrl(path: string | null | undefined): string | null {
   return `${JTL_IMAGE_BASE}${p}`;
 }
 
-function readUrlToken(): string | null {
-  if (typeof window === "undefined") return null;
-  const sp = new URLSearchParams(window.location.search);
-  const t = sp.get("token")?.trim();
-  return t || null;
+function readMirrorUrlParams() {
+  if (typeof window === "undefined") {
+    return parseMirrorUrlParams("");
+  }
+  return parseMirrorUrlParams(window.location.search);
 }
 
-function readUrlProductId(): string | null {
-  if (typeof window === "undefined") return null;
-  const sp = new URLSearchParams(window.location.search);
-  const id = sp.get("id")?.trim();
-  return id || null;
+function readUrlJtlToken(): string {
+  const token = readMirrorUrlParams().jtlToken?.trim();
+  if (!token) {
+    throw new Error("t fehlt in der URL (?t=...)");
+  }
+  return token;
 }
 
-const DEFAULT_ARTIKEL_ID = "17406";
-const DEFAULT_ARTICAL_NUMBER = "23582";
+function readUrlSid(): string {
+  const sid = readMirrorUrlParams().sessionId?.trim();
+  if (!sid) {
+    throw new Error("sid fehlt in der URL (?sid=...)");
+  }
+  return sid;
+}
+
+function requireProductLighting(
+  payload: ProductLightingPayload | null | undefined
+): ProductLightingPayload {
+  if (!payload) {
+    throw new Error(
+      "Produktattribute nicht geladen (/api/product-attributes). Seite mit ?n= und gültiger Session neu öffnen."
+    );
+  }
+  return payload;
+}
 
 function resolveProductIdsFromUrl(): {
   artikelId: string;
   articalNumber: string;
 } {
-  const fromUrl = readUrlProductId();
-  if (fromUrl && /^\d+$/.test(fromUrl)) {
-    // URL id у цьому проєкті відповідає артикулу/номерy (artical_number),
-    // але JTL поля a/artikel очікують внутрішній kArtikel (для цього товару 17406).
-    return { artikelId: DEFAULT_ARTIKEL_ID, articalNumber: fromUrl };
-  }
-  return {
-    artikelId: DEFAULT_ARTIKEL_ID,
-    articalNumber: DEFAULT_ARTICAL_NUMBER,
-  };
+  return resolveProductIdsFromUrlParams(readMirrorUrlParams());
 }
 
 /**
@@ -562,16 +589,19 @@ function isAmbientLightGroup(group: RawConfigGroup): boolean {
   return title.includes("ambientelicht");
 }
 
-export default function ConfigStep({
-  onSelectionChange,
-  onSummChange,
-  onLightTemperatureChange,
-  onAmbientBacklightChange,
-  widthMm: widthMmFromStep1,
-  heightMm: heightMmFromStep1,
-  activeStep = 2,
-  productLightingPayload,
-}: Props) {
+const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
+  {
+    onSelectionChange,
+    onSummChange,
+    onLightTemperatureChange,
+    onAmbientBacklightChange,
+    widthMm: widthMmFromStep1,
+    heightMm: heightMmFromStep1,
+    activeStep = 2,
+    productLightingPayload,
+  },
+  ref
+) {
   const [configGroups, setConfigGroups] = useState<RawConfigGroup[]>([]);
   const [stepGroupMap, setStepGroupMap] = useState<StepGroupMap | null>(null);
   const [jtlToken, setJtlToken] = useState<string | null>(null);
@@ -595,12 +625,11 @@ export default function ConfigStep({
     let cancelled = false;
     async function loadConfig() {
       try {
-        const urlToken = readUrlToken();
-        if (urlToken) setJtlToken(urlToken);
-        const apiUrl = urlToken
-          ? `/api/config?jtl_token=${encodeURIComponent(urlToken)}`
-          : "/api/config";
-        const res = await fetch(apiUrl, { cache: "no-store" });
+        const urlParams = readMirrorUrlParams();
+        if (urlParams.jtlToken) setJtlToken(urlParams.jtlToken);
+        const res = await fetch(buildConfigApiPath(urlParams), {
+          cache: "no-store",
+        });
         if (!res.ok) {
           console.error("Failed to load /api/config:", res.status);
           return;
@@ -790,6 +819,56 @@ export default function ConfigStep({
   }, []);
 
   const [selections, setSelections] = useState<GroupSelection[]>([]);
+
+  const addToCart = useCallback(async () => {
+    const token = readUrlJtlToken();
+    const sid = readUrlSid();
+    if (!configGroups.length) {
+      throw new Error("Konfiguration ist noch nicht geladen");
+    }
+
+    const lighting = requireProductLighting(productLightingPayload);
+    const { artikelId, articalNumber } = resolveProductIdsFromUrl();
+    const opt = configGroups.slice(1);
+    const item = buildConfigurationItemMap(configGroups, opt, selections);
+    const { customSizeConfigItem, customSizeConfigGroup, mirrorDims } =
+      deriveEffectiveSizeContext(configGroups);
+
+    const body = buildAddToCartRequestBody({
+      artikelId,
+      articalNumber,
+      token,
+      sid,
+      qty: 1,
+      lighting,
+      item,
+      customSizeConfigItem: String(customSizeConfigItem),
+      customSizeConfigGroup: String(customSizeConfigGroup),
+      widthMm: mirrorDims.widthMm,
+      heightMm: mirrorDims.heightMm,
+    });
+
+    const res = await fetch("/api/add-to-cart", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    const data = (await res.json()) as AddToCartResponse;
+    if (!res.ok) {
+      throw new Error(
+        data.error || data.message || `Warenkorb fehlgeschlagen (${res.status})`
+      );
+    }
+    if (!data.success || !data.url) {
+      throw new Error(
+        data.error || data.message || "Warenkorb: unerwartete Antwort vom Server"
+      );
+    }
+    window.location.href = data.url;
+  }, [configGroups, selections, productLightingPayload]);
+
+  useImperativeHandle(ref, () => ({ addToCart }), [addToCart]);
 
   useEffect(() => {
     if (!onLightTemperatureChange) return;
@@ -1228,7 +1307,8 @@ export default function ConfigStep({
     const groups = configGroups;
     if (!groups.length || !nextSelections.length) return;
 
-    const token = jtlToken ?? DEFAULT_JTL_TOKEN_CLIENT;
+    const token = readUrlJtlToken();
+    const lighting = requireProductLighting(productLightingPayload);
     const opt = groups.slice(1);
     const { customSizeConfigItem, customSizeConfigGroup, mirrorDims } =
       deriveEffectiveSizeContext(groups);
@@ -1247,17 +1327,17 @@ export default function ConfigStep({
       eigenschaftwert: { "1601": "", "1602": "" },
       artical_number: articalNumber,
       data_file_exist: "1",
-      mir_type: productLightingPayload?.mir_type ?? "square",
-      str_type: productLightingPayload?.str_type ?? "xside",
-      mir_model: productLightingPayload?.mir_model ?? "comfort",
-      str_widt: productLightingPayload?.str_widt ?? "30",
-      str_vert_bside: productLightingPayload?.str_vert_bside ?? "40",
-      str_vert_top: productLightingPayload?.str_vert_top ?? "60",
-      str_vert_btm: productLightingPayload?.str_vert_btm ?? "60",
-      str_hori_bside: productLightingPayload?.str_hori_bside ?? "0",
-      str_hori_top: productLightingPayload?.str_hori_top ?? "0",
-      str_hori_btm: productLightingPayload?.str_hori_btm ?? "0",
-      shining_sid: productLightingPayload?.shining_sid ?? "no",
+      mir_type: lighting.mir_type,
+      str_type: lighting.str_type,
+      mir_model: lighting.mir_model,
+      str_widt: lighting.str_widt,
+      str_vert_bside: lighting.str_vert_bside,
+      str_vert_top: lighting.str_vert_top,
+      str_vert_btm: lighting.str_vert_btm,
+      str_hori_bside: lighting.str_hori_bside,
+      str_hori_top: lighting.str_hori_top,
+      str_hori_btm: lighting.str_hori_btm,
+      shining_sid: lighting.shining_sid,
       item,
       customSizeConfigItem: String(customSizeConfigItem),
       customSizeConfigGroup: String(customSizeConfigGroup),
@@ -1687,5 +1767,7 @@ export default function ConfigStep({
         )}
     </section>
   );
-}
+});
+
+export default ConfigStep;
 

@@ -1548,7 +1548,8 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
             <div
               className={
                 "dimension-group jtl-config-group" +
-                (isAdditional ? " jtl-config-additional" : "")
+                (isAdditional ? " jtl-config-additional" : "") +
+                (showAdditionalPrompt ? " jtl-config-additional--empty" : "")
               }
               key={rowKey}
             >

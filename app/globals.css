@@ -1498,12 +1498,16 @@ main.app-root {
   flex: 1 1 100%;
   width: 100%;
   max-width: 100%;
+}
+
+.controls-panel .config-jtl-compact .jtl-config-additional.jtl-config-additional--empty .dimension-manual-input-wrapper,
+.controls-panel .config-jtl-compact .jtl-config-additional.jtl-config-additional--empty .jtl-config-select-shell,
+.controls-panel .config-jtl-compact .jtl-config-additional.jtl-config-additional--empty .jtl-options-multiselect {
   box-shadow: 0px 0px 8px 2px rgba(245, 158, 11, 0.5);
 }
 
 .controls-panel .config-jtl-compact .jtl-config-additional .jtl-options-multiselect {
   width: 100%;
-  box-shadow: 0px 0px 8px 2px rgba(245, 158, 11, 0.5);
 }
 
 .controls-panel .config-jtl-compact .jtl-options-multiselect {

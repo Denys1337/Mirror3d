@@ -140,6 +140,8 @@ type GroupSelection = {
 type Props = {
   onSelectionChange?: (groups: GroupSelection[]) => void;
   onSummChange?: (summ: number) => void;
+  onSummaryChange?: (summary: ConfigSummaryPayload) => void;
+  onManufacturerChange?: (manufacturer: string | null) => void;
   onLightTemperatureChange?: (kelvin: number) => void;
   onAmbientBacklightChange?: (
     mode:
@@ -161,6 +163,17 @@ type Props = {
 
 export type ConfigStepHandle = {
   addToCart: () => Promise<void>;
+};
+
+export type ConfigSummaryLine = {
+  label: string;
+  price: string;
+};
+
+export type ConfigSummaryPayload = {
+  widthMm: number;
+  heightMm: number;
+  lines: ConfigSummaryLine[];
 };
 
 type StepGroupMap = {
@@ -201,6 +214,38 @@ function plainLabelFromApi(raw: string | undefined | null): string {
   if (!raw) return "";
   const decoded = decodeHtmlEntities(raw);
   return decoded.replace(/<[^>]*>/g, "").trim();
+}
+
+function extractManufacturerFromUnknown(data: unknown): string | null {
+  const visited = new WeakSet<object>();
+  const walk = (value: unknown): string | null => {
+    if (value == null) return null;
+    if (typeof value !== "object") return null;
+    if (visited.has(value as object)) return null;
+    visited.add(value as object);
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const found = walk(item);
+        if (found) return found;
+      }
+      return null;
+    }
+
+    const obj = value as Record<string, unknown>;
+    for (const [k, v] of Object.entries(obj)) {
+      if (typeof v === "string" && /hersteller|manufacturer|brand|marke/i.test(k)) {
+        const plain = plainLabelFromApi(v);
+        if (plain) return plain;
+      }
+    }
+    for (const child of Object.values(obj)) {
+      const found = walk(child);
+      if (found) return found;
+    }
+    return null;
+  };
+  return walk(data);
 }
 
 function formatPriceEuro(value: number | undefined): string | null {
@@ -607,6 +652,8 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
   {
     onSelectionChange,
     onSummChange,
+    onSummaryChange,
+    onManufacturerChange,
     onLightTemperatureChange,
     onAmbientBacklightChange,
     widthMm: widthMmFromStep1,
@@ -660,6 +707,9 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
         if (!cancelled) {
           console.log("Loaded config groups:", response.oKonfig_arr.length);
           setConfigGroups(response.oKonfig_arr);
+          if (onManufacturerChange) {
+            onManufacturerChange(extractManufacturerFromUnknown(data));
+          }
           /* Той самий токен, що реально використав /api/config (з .env), а не лише з varAssigns */
           const serverTok = res.headers.get("x-jtl-token")?.trim();
           if (serverTok) setJtlToken(serverTok);
@@ -939,6 +989,33 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       parseAmbientBacklightModeFromLabel(selectedItem?.cName)
     );
   }, [optionGroups, selections, onAmbientBacklightChange]);
+
+  useEffect(() => {
+    if (!onSummaryChange || configGroups.length === 0) return;
+    const { mirrorDims } = deriveEffectiveSizeContext(configGroups);
+    const lines: ConfigSummaryLine[] = [];
+    const options = configGroups.slice(1);
+
+    options.forEach((group, idx) => {
+      const selectedIds =
+        selections.find((s) => s.groupIndex === idx)?.selectedItemIds ?? [];
+      if (!selectedIds.length) return;
+      selectedIds.forEach((selectedId) => {
+        const item = group.oItem_arr.find((it) => it.kKonfigitem === selectedId);
+        if (!item) return;
+        lines.push({
+          label: plainLabelFromApi(item.cName),
+          price: optionDisplayPrice(item) ?? "0,00 €",
+        });
+      });
+    });
+
+    onSummaryChange({
+      widthMm: mirrorDims.widthMm,
+      heightMm: mirrorDims.heightMm,
+      lines,
+    });
+  }, [configGroups, onSummaryChange, selections, widthMmFromStep1, heightMmFromStep1]);
 
   const visibleGroupIndices = useMemo(() => {
     // Поки мапа не завантажилась — не ламаємо UX: на кроках 2..4 показуємо всі групи.

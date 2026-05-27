@@ -1519,6 +1519,30 @@ main.app-root {
   box-sizing: border-box;
 }
 
+.controls-panel .config-summary-box {
+  margin-top: 12px;
+  padding: 0;
+}
+
+.controls-panel .config-summary-meta {
+  margin: 0 0 4px;
+  color: rgba(51, 65, 85, 1);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.controls-panel .config-summary-list {
+  margin: 12px 0 0;
+  padding-left: 20px;
+}
+
+.controls-panel .config-summary-list li {
+  margin-bottom: 6px;
+  color: rgba(51, 65, 85, 1);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
 .controls-panel .config-jtl-compact .jtl-checkbox-row {
   margin-top: 6px;
   font-size: 14px;

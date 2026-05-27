@@ -9,8 +9,8 @@ import * as THREE from "three";
 const DEFAULT_CAMERA_DISTANCE = 3.75;
 
 /**
- * Той самий HDR: сфера ззаду (відображення «далі») + scene.environment для IBL,
- * щоб сцена не була плоскою без світла.
+ * Використовуємо HDR лише як джерело відбиттів (IBL),
+ * без фонового зображення навколо стіни.
  */
 function BathroomHdrBackdrop({ hdrRotation = 0 }: { hdrRotation?: number }) {
   const map = useEnvironment({ files: "/images/modern_bathroom_4k.hdr" });
@@ -24,31 +24,12 @@ function BathroomHdrBackdrop({ hdrRotation = 0 }: { hdrRotation?: number }) {
     map.needsUpdate = true;
   }, [map, gl]);
 
-  const center: [number, number, number] = [0, 1.05, -16];
-  const radius = 36;
-
   return (
-    <>
-      <Environment
-        map={map}
-        environmentIntensity={1}
-        environmentRotation={new THREE.Euler(0, hdrRotation, 0)}
-      />
-      <mesh
-        position={center}
-        rotation={[0, hdrRotation, 0]}
-        renderOrder={-100}
-        frustumCulled={false}
-      >
-        <sphereGeometry args={[radius, 72, 48]} />
-        <meshBasicMaterial
-          map={map}
-          side={THREE.BackSide}
-          toneMapped
-          depthWrite={false}
-        />
-      </mesh>
-    </>
+    <Environment
+      map={map}
+      environmentIntensity={1}
+      environmentRotation={new THREE.Euler(0, hdrRotation, 0)}
+    />
   );
 }
 

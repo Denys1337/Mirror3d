@@ -3,7 +3,10 @@
 import { useState, useEffect, useMemo, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import MirrorScene from "../components/MirrorScene";
-import ConfigStep, { type ConfigStepHandle } from "../components/ConfigStep";
+import ConfigStep, {
+  type ConfigStepHandle,
+  type ConfigSummaryPayload,
+} from "../components/ConfigStep";
 import { resolveProductAttributesId } from "../lib/productIds";
 import {
   parseProductLightingPayload,
@@ -168,6 +171,10 @@ function HomePageContent() {
   const [shelfLengthMm, setShelfLengthMm] = useState(800);
   const [activeStep, setActiveStep] = useState<number>(1);
   const [jtlSumm, setJtlSumm] = useState<number | null>(null);
+  const [configSummary, setConfigSummary] = useState<ConfigSummaryPayload | null>(
+    null
+  );
+  const [manufacturerName, setManufacturerName] = useState<string | null>(null);
   const [stepRestored, setStepRestored] = useState(false);
   const [cartLoading, setCartLoading] = useState(false);
   const [cartError, setCartError] = useState<string | null>(null);
@@ -278,6 +285,34 @@ function HomePageContent() {
 
     loadProductAttributes();
   }, [mirrorIdFromUrl, mirrorArticalFromUrl]);
+
+  useEffect(() => {
+    if (manufacturerName) return;
+    const id = (mirrorIdFromUrl || "").trim();
+    if (!id) return;
+    let cancelled = false;
+
+    const loadManufacturerFallback = async () => {
+      try {
+        const res = await fetch(`/api/product-manufacturer?id=${id}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { manufacturer?: string | null };
+        const value = (data.manufacturer || "").trim();
+        if (!cancelled && value) {
+          setManufacturerName(value);
+        }
+      } catch {
+        // ignore fallback failures
+      }
+    };
+
+    void loadManufacturerFallback();
+    return () => {
+      cancelled = true;
+    };
+  }, [manufacturerName, mirrorIdFromUrl]);
 
   // Preisberechnung
   const calculatePrice = () => {
@@ -1027,12 +1062,37 @@ function HomePageContent() {
             widthMm={committedWidthMm}
             heightMm={committedHeightMm}
             onSummChange={setJtlSumm}
+            onSummaryChange={setConfigSummary}
+            onManufacturerChange={setManufacturerName}
             onLightTemperatureChange={setLightTemperatureK}
             onAmbientBacklightChange={setAmbientBacklightMode}
             activeStep={activeStep}
             productLightingPayload={productLightingPayload}
           />
         </div>
+
+        {activeStep === 5 && (
+          <section className="config-summary-box">
+            <p className="config-summary-meta">
+              <strong>Artikelnummer:</strong> {mirrorArticalFromUrl || "—"}
+            </p>
+            {/* <p className="config-summary-meta">
+              <strong>Hersteller:</strong> {manufacturerName || "—"}
+            </p> */}
+            <ul className="config-summary-list">
+              <li>
+                {`1x ${configSummary?.widthMm ?? committedWidthMm} x ${
+                  configSummary?.heightMm ?? committedHeightMm
+                } mm BxH » 0,00 € Stückpreis`}
+              </li>
+              {(configSummary?.lines ?? []).map((line, idx) => (
+                <li key={`${idx}-${line.label}`}>
+                  {`1x ${line.label} » ${line.price} Stückpreis`}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <div className="price-section">
           <div className="price-label">Gesamtpreis</div>

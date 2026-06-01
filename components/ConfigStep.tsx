@@ -14,6 +14,34 @@ import { buildAddToCartRequestBody } from "../lib/cartPayload";
 import type { AddToCartResponse } from "../lib/cartPayload";
 import type { ProductLightingPayload } from "../lib/productLighting";
 import {
+  buildGroupShortLookup,
+  collectAllChildGroupShorts,
+  getRowHintFromArticleRules,
+  getTriggeredGroupShorts,
+  hasConfigGroupItemSelected,
+  hasKosmetikPositionInSelections,
+  isDependencyOnlyGroup,
+  isKosmetikPositionGroupTitle,
+  isKosmetikPositionPromptText,
+  sanitizeGkHintHtml,
+  selectedItemKeysFromSelections,
+  shouldShowConfigGroupFromGk,
+  type GkArticleRule,
+  type GkGruppeMap,
+} from "../lib/gkJson";
+import {
+  buildKosmetikAbstandFields,
+  buildKosmetikEigenschaftwert,
+  clampKosmetikAbstandMm,
+  emptyKosmetikAbstandDraft,
+  getKosmetikAbstandFieldHint,
+  kosmetikAbstandDraftToJtl,
+  readKosmetikAbstandInput,
+  sanitizeKosmetikAbstandInput,
+  type KosmetikAbstandFieldView,
+  type KosmetikAbstandKind,
+} from "../lib/kosmetikAbstand";
+import {
   buildConfigApiPath,
   parseMirrorUrlParams,
   resolveProductIdsFromUrlParams,
@@ -135,6 +163,8 @@ type RawConfigItem = {
 type GroupSelection = {
   groupIndex: number;
   selectedItemIds: number[]; // kKonfigitem
+  /** мм — Abstand Kosmetikspiegel (JTL bAnzahl) */
+  quantityMm?: number;
 };
 
 type Props = {
@@ -330,167 +360,57 @@ function resolveProductIdsFromUrl(): {
   return resolveProductIdsFromUrlParams(readMirrorUrlParams());
 }
 
-/**
- * kKonfiggruppe, die im Original-Shop nicht in den ~16 «Haupt»-Dropdowns stehen,
- * sondern erst erscheinen, wenn Abhängigkeiten sie aktivieren (Position…, Anschluss…, usw.).
- * Ohne diese Regel blendet man bei bAktiv:false fast alles aus → nur 2–3 Selects.
- */
-/**
- * Підгрупи, що на оригіналі ховаються, поки батьківський вибір їх не «вмикає» (Position…, Anschluss…).
- * Не додавати сюди батьківські групи на кшталт kKonfiggruppe 11: при bAktiv:false на групі й без bAktiv на
- * пунктах рядок зникне повністю — користувач не зможе зробити перший вибір.
- */
-const DEFERRED_KONFIG_GRUPPE_IDS = new Set<number>([
-  476, 493, 432, 431, 367, 428, 396, 407, 404, 389,
-]);
-
-const UHR_WETTERSTATION_KONFIG_GRUPPE = 11;
-const BEFESTIGUNG_KONFIG_GRUPPE = 288;
+/** Лише для 3D-превʼю (колір температури), не для видимості селектів. */
 const LICHTFARBE_KONFIG_GRUPPE = 261;
-const SCHALTER_DIMMER_KONFIG_GRUPPE = 27;
-const SCHALTER_DIMMER_CCT_KONFIG_GRUPPE = 509;
-
-const LICHTFARBE_AKTIVIERT_27 = new Set<number>([2374, 1216, 1215]);
-const LICHTFARBE_AKTIVIERT_509 = new Set<number>([2566]);
-const SCHALTER27_AKTIVIERT_493 = new Set<number>([2319]);
-const SCHALTER509_AKTIVIERT_493 = new Set<number>([2559, 2560, 2567]);
-const SCHALTER27_AKTIVIERT_431 = new Set<number>([275, 1972, 1960, 1224]);
-const SCHALTER509_AKTIVIERT_432 = new Set<number>([2557, 2558]);
-
-/** Після вибору в «Uhr / Wetterstation» з’являються Position der Anzeige (428) та Anschluss (396). */
-const DEFERRED_AFTER_UHR_GRUPPEN = new Set<number>([428, 396]);
-
-/** Додаткові селекти, що з’являються після вибору в батьківській групі. */
-function isAdditionalConfigGroup(kKonfiggruppe: number | undefined): boolean {
-  if (kKonfiggruppe == null) return false;
-  return (
-    DEFERRED_KONFIG_GRUPPE_IDS.has(kKonfiggruppe) ||
-    DEFERRED_AFTER_UHR_GRUPPEN.has(kKonfiggruppe)
-  );
-}
 
 function additionalSelectPrompt(groupTitle: string): string {
   const title = groupTitle.trim() || "Option";
   return `Bitte wählen Sie die ${title}`;
 }
 
-/**
- * Варіанти Befestigung «montiert» / спец. — на оригіналі під ними часто з’являється «Optionale Montagelösung» (476).
- */
-const MONTAGE_AKTIVIERT_476 = new Set<number>([
-  2584, 1471, 1900, 1901,
-]);
+type GkVisibilityContext = {
+  stepGroupIds: Set<number>;
+  allChildShorts: Set<string>;
+  triggeredShorts: Set<string>;
+  kgToShort: Map<number, string>;
+};
 
-function selectionItemIdForKonfigGruppe(
+function buildGkVisibilityContext(
   optionGroups: RawConfigGroup[],
   selections: GroupSelection[],
-  kKonfiggruppe: number
-): number | null {
-  const idx = optionGroups.findIndex((g) => g.kKonfiggruppe === kKonfiggruppe);
-  if (idx < 0) return null;
-  const sid = selections.find((s) => s.groupIndex === idx)?.selectedItemIds?.[0];
-  return sid != null && sid > 0 ? sid : null;
+  activeStep: number,
+  stepGroupMap: StepGroupMap | null,
+  gruppeMap: GkGruppeMap
+): GkVisibilityContext {
+  const { kgToShort } = buildGroupShortLookup(optionGroups);
+  const allChildShorts = collectAllChildGroupShorts(gruppeMap);
+  const itemKeys = selectedItemKeysFromSelections(optionGroups, selections);
+  const triggeredShorts = getTriggeredGroupShorts(itemKeys, gruppeMap);
+  const stepGroupIds =
+    stepGroupMap && (activeStep === 2 || activeStep === 3 || activeStep === 4)
+      ? stepGroupMap[activeStep]
+      : new Set<number>();
+  return { stepGroupIds, allChildShorts, triggeredShorts, kgToShort };
 }
 
-/**
- * Відкладені рядки: за JTL (bAktiv / пункти) або за відомими залежностями від батьківського селекта —
- * щоб після відповіді одразу з’являлись поля, навіть якщо valid:false і бекенд не проставив bAktiv.
- */
 function shouldShowConfigGroupRow(
   group: RawConfigGroup,
-  optionGroups: RawConfigGroup[],
-  selections: GroupSelection[]
+  ctx: GkVisibilityContext
 ): boolean {
-  const id = group.kKonfiggruppe;
-  if (id == null) return true;
-
-  if (DEFERRED_AFTER_UHR_GRUPPEN.has(id)) {
-    const uhrId = selectionItemIdForKonfigGruppe(
-      optionGroups,
-      selections,
-      UHR_WETTERSTATION_KONFIG_GRUPPE
-    );
-    return uhrId != null;
-  }
-
-  if (id === 476) {
-    const befId = selectionItemIdForKonfigGruppe(
-      optionGroups,
-      selections,
-      BEFESTIGUNG_KONFIG_GRUPPE
-    );
-    return befId != null && MONTAGE_AKTIVIERT_476.has(befId);
-  }
-
-  if (id === SCHALTER_DIMMER_KONFIG_GRUPPE) {
-    const lichtfarbeId = selectionItemIdForKonfigGruppe(
-      optionGroups,
-      selections,
-      LICHTFARBE_KONFIG_GRUPPE
-    );
-    return (
-      lichtfarbeId != null && LICHTFARBE_AKTIVIERT_27.has(lichtfarbeId)
-    );
-  }
-
-  if (id === SCHALTER_DIMMER_CCT_KONFIG_GRUPPE) {
-    const lichtfarbeId = selectionItemIdForKonfigGruppe(
-      optionGroups,
-      selections,
-      LICHTFARBE_KONFIG_GRUPPE
-    );
-    return (
-      lichtfarbeId != null && LICHTFARBE_AKTIVIERT_509.has(lichtfarbeId)
-    );
-  }
-
-  if (id === 493) {
-    const s27 = selectionItemIdForKonfigGruppe(
-      optionGroups,
-      selections,
-      SCHALTER_DIMMER_KONFIG_GRUPPE
-    );
-    const s509 = selectionItemIdForKonfigGruppe(
-      optionGroups,
-      selections,
-      SCHALTER_DIMMER_CCT_KONFIG_GRUPPE
-    );
-    return (
-      (s27 != null && SCHALTER27_AKTIVIERT_493.has(s27)) ||
-      (s509 != null && SCHALTER509_AKTIVIERT_493.has(s509))
-    );
-  }
-
-  if (id === 431) {
-    const s27 = selectionItemIdForKonfigGruppe(
-      optionGroups,
-      selections,
-      SCHALTER_DIMMER_KONFIG_GRUPPE
-    );
-    return s27 != null && SCHALTER27_AKTIVIERT_431.has(s27);
-  }
-
-  if (id === 432) {
-    const s509 = selectionItemIdForKonfigGruppe(
-      optionGroups,
-      selections,
-      SCHALTER_DIMMER_CCT_KONFIG_GRUPPE
-    );
-    return s509 != null && SCHALTER509_AKTIVIERT_432.has(s509);
-  }
-
-  if (DEFERRED_KONFIG_GRUPPE_IDS.has(id)) {
-    if (group.bAktiv === false) {
-      return group.oItem_arr?.some((i) => i.bAktiv) ?? false;
-    }
-    return true;
-  }
-  return true;
+  if (!ctx.stepGroupIds.size) return true;
+  return shouldShowConfigGroupFromGk(
+    group,
+    ctx.stepGroupIds,
+    ctx.allChildShorts,
+    ctx.triggeredShorts,
+    ctx.kgToShort
+  );
 }
 
 function pruneSelectionsForHiddenRows(
   optionGroups: RawConfigGroup[],
-  selections: GroupSelection[]
+  selections: GroupSelection[],
+  ctx: GkVisibilityContext
 ): GroupSelection[] {
   let current = selections;
   const passes = Math.max(4, optionGroups.length + 1);
@@ -499,7 +419,7 @@ function pruneSelectionsForHiddenRows(
     const next = current.map((sel) => {
       const group = optionGroups[sel.groupIndex];
       if (!group) return sel;
-      const visible = shouldShowConfigGroupRow(group, optionGroups, current);
+      const visible = shouldShowConfigGroupRow(group, ctx);
       if (!visible && sel.selectedItemIds.length > 0) {
         changed = true;
         return { groupIndex: sel.groupIndex, selectedItemIds: [] };
@@ -665,6 +585,8 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
 ) {
   const [configGroups, setConfigGroups] = useState<RawConfigGroup[]>([]);
   const [stepGroupMap, setStepGroupMap] = useState<StepGroupMap | null>(null);
+  const [gkGruppeMap, setGkGruppeMap] = useState<GkGruppeMap>({});
+  const [gkArticleRules, setGkArticleRules] = useState<GkArticleRule[]>([]);
   const [jtlToken, setJtlToken] = useState<string | null>(null);
   const [configApiWarning, setConfigApiWarning] = useState<string | null>(null);
   const [, setLastKonfigValid] = useState<boolean | undefined>(undefined);
@@ -843,6 +765,14 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
     return () => root.removeEventListener("click", onClick);
   }, [optionInfoPopup, optionInfoHtml]);
 
+  const [selections, setSelections] = useState<GroupSelection[]>([]);
+  const [kosmetikAbstandDraft, setKosmetikAbstandDraft] = useState(
+    emptyKosmetikAbstandDraft
+  );
+  const kosmetikAbstandDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+
   // Пропускаємо першу групу "Spiegelmaß" (розміри), бо її вже конфігуруємо в Step 1
   const optionGroups = useMemo(
     () =>
@@ -850,14 +780,57 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
     [configGroups]
   );
 
-  // Карта груп по степах з gk_json.php (ігноруємо step 1).
+  const allStepGroupIds = useMemo(() => {
+    if (!stepGroupMap) return new Set<number>();
+    return new Set<number>([
+      ...stepGroupMap[2],
+      ...stepGroupMap[3],
+      ...stepGroupMap[4],
+    ]);
+  }, [stepGroupMap]);
+
+  const gkPruneCtx = useMemo(
+    () =>
+      buildGkVisibilityContext(
+        optionGroups,
+        selections,
+        activeStep,
+        stepGroupMap,
+        gkGruppeMap
+      ),
+    [optionGroups, selections, activeStep, stepGroupMap, gkGruppeMap]
+  );
+
+  const gkPruneCtxAllSteps = useMemo(() => {
+    const { kgToShort } = buildGroupShortLookup(optionGroups);
+    const allChildShorts = collectAllChildGroupShorts(gkGruppeMap);
+    const itemKeys = selectedItemKeysFromSelections(optionGroups, selections);
+    const triggeredShorts = getTriggeredGroupShorts(itemKeys, gkGruppeMap);
+    return {
+      stepGroupIds: allStepGroupIds,
+      allChildShorts,
+      triggeredShorts,
+      kgToShort,
+    };
+  }, [optionGroups, selections, gkGruppeMap, allStepGroupIds]);
+
+  // gk_json.php: кроки, залежності (gruppe), підказки/помилки (article).
   useEffect(() => {
     let cancelled = false;
-    async function loadStepMap() {
+    async function loadGkJson() {
       try {
-        const res = await fetch("/api/jtl-group-steps", { cache: "no-store" });
+        const { artikelId } = resolveProductIdsFromUrl();
+        const res = await fetch(
+          `/api/jtl-gk-json?gruppe=1&article=${encodeURIComponent(artikelId || "1")}`,
+          { cache: "no-store" }
+        );
         if (!res.ok) return;
-        const data = (await res.json()) as Record<string, unknown>;
+        const data = (await res.json()) as {
+          steps?: Record<string, unknown>;
+          gruppe?: GkGruppeMap;
+          article?: GkArticleRule[];
+        };
+        if (cancelled) return;
         const toSet = (v: unknown): Set<number> =>
           new Set(
             Array.isArray(v)
@@ -866,23 +839,23 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
                   .filter((n) => Number.isFinite(n) && n > 0)
               : []
           );
-        const map: StepGroupMap = {
-          2: toSet(data["2"]),
-          3: toSet(data["3"]),
-          4: toSet(data["4"]),
-        };
-        if (!cancelled) setStepGroupMap(map);
+        const steps = data.steps ?? {};
+        setStepGroupMap({
+          2: toSet(steps["2"]),
+          3: toSet(steps["3"]),
+          4: toSet(steps["4"]),
+        });
+        setGkGruppeMap(data.gruppe ?? {});
+        setGkArticleRules(Array.isArray(data.article) ? data.article : []);
       } catch {
-        // ignore: fallback без мапи — показувати всі групи на step 2
+        // fallback: без мапи — показувати всі групи на step 2
       }
     }
-    void loadStepMap();
+    void loadGkJson();
     return () => {
       cancelled = true;
     };
   }, []);
-
-  const [selections, setSelections] = useState<GroupSelection[]>([]);
 
   const addToCart = useCallback(async () => {
     const token = readUrlJtlToken();
@@ -1038,11 +1011,11 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
     const stillInStep = visibleGroupIndices.includes(singleOpenGroupIdx);
     const group = optionGroups[singleOpenGroupIdx];
     const stillVisibleByRules =
-      !!group && shouldShowConfigGroupRow(group, optionGroups, selections);
+      !!group && shouldShowConfigGroupRow(group, gkPruneCtx);
     if (!stillInStep || !stillVisibleByRules) {
       setSingleOpenGroupIdx(null);
     }
-  }, [singleOpenGroupIdx, visibleGroupIndices, optionGroups, selections]);
+  }, [singleOpenGroupIdx, visibleGroupIndices, optionGroups, selections, gkPruneCtx]);
 
   const emitSummIfExists = (data: unknown) => {
     if (!onSummChange) return;
@@ -1146,6 +1119,41 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       mirrorDims,
     };
   };
+
+  const kosmetikPositionPicked = useMemo(
+    () => hasKosmetikPositionInSelections(optionGroups, selections),
+    [optionGroups, selections]
+  );
+
+  const kosmetikMirrorDims = useMemo(() => {
+    if (!configGroups.length) {
+      return {
+        widthMm:
+          typeof widthMmFromStep1 === "number" && widthMmFromStep1 > 0
+            ? widthMmFromStep1
+            : 400,
+        heightMm:
+          typeof heightMmFromStep1 === "number" && heightMmFromStep1 > 0
+            ? heightMmFromStep1
+            : 400,
+      };
+    }
+    return deriveEffectiveSizeContext(configGroups).mirrorDims;
+  }, [configGroups, widthMmFromStep1, heightMmFromStep1]);
+
+  const kosmetikAbstandFields = useMemo(() => {
+    if (!kosmetikPositionPicked) return [];
+    return buildKosmetikAbstandFields(
+      optionGroups,
+      kosmetikMirrorDims.widthMm,
+      kosmetikMirrorDims.heightMm
+    );
+  }, [
+    kosmetikPositionPicked,
+    optionGroups,
+    kosmetikMirrorDims.widthMm,
+    kosmetikMirrorDims.heightMm,
+  ]);
 
   const buildKonfigItemPreice = (groups: RawConfigGroup[]) => {
     const map: Record<string, number> = {};
@@ -1384,7 +1392,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
         updated,
         validity === false
       );
-      return pruneSelectionsForHiddenRows(updated.slice(1), merged);
+      return pruneSelectionsForHiddenRows(updated.slice(1), merged, gkPruneCtxAllSteps);
     });
   };
 
@@ -1393,7 +1401,8 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
    * потім load_konfig з тим самим items[], що вже відповідає новій конфігурації.
    */
   const buildConfigurationThenLoadKonfig = async (
-    nextSelections: GroupSelection[]
+    nextSelections: GroupSelection[],
+    kosmetikDraftOverride?: Record<KosmetikAbstandKind, string>
   ) => {
     const groups = configGroups;
     if (!groups.length || !nextSelections.length) return;
@@ -1404,6 +1413,18 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
     const { customSizeConfigItem, customSizeConfigGroup, mirrorDims } =
       deriveEffectiveSizeContext(groups);
     const item = buildConfigurationItemMap(groups, opt, nextSelections);
+    const positionPicked = hasKosmetikPositionInSelections(opt, nextSelections);
+    const abstandFields = buildKosmetikAbstandFields(
+      opt,
+      mirrorDims.widthMm,
+      mirrorDims.heightMm
+    );
+    const eigenschaftwert = buildKosmetikEigenschaftwert({
+      fields: abstandFields,
+      selections: nextSelections,
+      draft: kosmetikDraftOverride ?? kosmetikAbstandDraft,
+      positionPicked,
+    });
 
     const { artikelId, articalNumber } = resolveProductIdsFromUrl();
 
@@ -1415,7 +1436,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       show: "1",
       kKundengruppe: "3",
       kSprache: "1",
-      eigenschaftwert: { "1601": "", "1602": "" },
+      eigenschaftwert,
       artical_number: articalNumber,
       data_file_exist: "1",
       mir_type: lighting.mir_type,
@@ -1477,12 +1498,89 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
     );
     const prunedAfterBuild = pruneSelectionsForHiddenRows(
       newGroups.slice(1),
-      mergedAfterBuild
+      mergedAfterBuild,
+      gkPruneCtxAllSteps
     );
     setConfigGroups([...newGroups]);
     setSelections(prunedAfterBuild);
 
     await executeLoadKonfig(prunedAfterBuild, newGroups);
+  };
+
+  const scheduleKosmetikAbstandReload = (
+    pruned: GroupSelection[],
+    draft: Record<KosmetikAbstandKind, string>
+  ) => {
+    if (kosmetikAbstandDebounceRef.current) {
+      clearTimeout(kosmetikAbstandDebounceRef.current);
+    }
+    kosmetikAbstandDebounceRef.current = setTimeout(() => {
+      kosmetikAbstandDebounceRef.current = null;
+      void buildConfigurationThenLoadKonfig(pruned, draft);
+    }, 500);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (kosmetikAbstandDebounceRef.current) {
+        clearTimeout(kosmetikAbstandDebounceRef.current);
+      }
+    };
+  }, []);
+
+  const applyKosmetikAbstandDraft = (
+    field: KosmetikAbstandFieldView,
+    draftText: string,
+    syncJtl: boolean
+  ) => {
+    const nextDraft = { ...kosmetikAbstandDraft, [field.kind]: draftText };
+    setKosmetikAbstandDraft(nextDraft);
+
+    const jtlMm = kosmetikAbstandDraftToJtl(draftText, field);
+    const quantityMm =
+      jtlMm === "" ? undefined : Number(jtlMm);
+
+    setSelections((prev) => {
+      let next = prev.map((s) => ({ ...s }));
+      if (field.groupIndex != null && field.kKonfigitem != null) {
+        const existingIdx = next.findIndex((s) => s.groupIndex === field.groupIndex);
+        const row: GroupSelection = {
+          groupIndex: field.groupIndex,
+          selectedItemIds: [field.kKonfigitem],
+          ...(quantityMm != null ? { quantityMm } : {}),
+        };
+        if (existingIdx >= 0) next[existingIdx] = row;
+        else next.push(row);
+      }
+      const pruned = pruneSelectionsForHiddenRows(
+        optionGroups,
+        next,
+        gkPruneCtxAllSteps
+      );
+      onSelectionChange?.(pruned);
+      if (syncJtl) scheduleKosmetikAbstandReload(pruned, nextDraft);
+      return pruned;
+    });
+  };
+
+  const handleKosmetikAbstandInput = (
+    field: KosmetikAbstandFieldView,
+    rawValue: string
+  ) => {
+    applyKosmetikAbstandDraft(field, sanitizeKosmetikAbstandInput(rawValue), true);
+  };
+
+  const handleKosmetikAbstandBlur = (
+    field: KosmetikAbstandFieldView,
+    rawValue: string
+  ) => {
+    const digits = sanitizeKosmetikAbstandInput(rawValue);
+    if (!digits) {
+      applyKosmetikAbstandDraft(field, "", true);
+      return;
+    }
+    const mm = clampKosmetikAbstandMm(Number(digits), field.min, field.max);
+    applyKosmetikAbstandDraft(field, String(mm), true);
   };
 
   const handleSingleSelectChange = (groupIdx: number, itemId: number) => {
@@ -1519,7 +1617,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
           ? { ...g, selectedItemIds: itemId ? [itemId] : [] }
           : g
       );
-      const pruned = pruneSelectionsForHiddenRows(optionGroups, next);
+      const pruned = pruneSelectionsForHiddenRows(optionGroups, next, gkPruneCtxAllSteps);
       onSelectionChange?.(pruned);
       void buildConfigurationThenLoadKonfig(pruned);
       return pruned;
@@ -1544,7 +1642,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
         }
         return { ...g, selectedItemIds: newIds };
       });
-      const pruned = pruneSelectionsForHiddenRows(optionGroups, next);
+      const pruned = pruneSelectionsForHiddenRows(optionGroups, next, gkPruneCtxAllSteps);
       onSelectionChange?.(pruned);
       void buildConfigurationThenLoadKonfig(pruned);
       return pruned;
@@ -1572,7 +1670,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
 
     lastSentSizeKeyRef.current = sizeKey;
     void buildConfigurationThenLoadKonfig(
-      pruneSelectionsForHiddenRows(optionGroups, selections)
+      pruneSelectionsForHiddenRows(optionGroups, selections, gkPruneCtxAllSteps)
     );
   }, [
     widthMmFromStep1,
@@ -1598,8 +1696,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       <div className="config-section">
         {visibleGroupIndices.map((idx) => {
           const group = optionGroups[idx];
-          if (!shouldShowConfigGroupRow(group, optionGroups, selections))
-            return null;
+          if (!shouldShowConfigGroupRow(group, gkPruneCtx)) return null;
           if (!group.oItem_arr?.length) return null;
 
           const selection = selections.find((s) => s.groupIndex === idx);
@@ -1615,11 +1712,35 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
           const rowKey = `${idx}-${group.kKonfiggruppe ?? "g"}-${aktivSig || "na"}`;
 
           const kg = group.kKonfiggruppe;
-          const isAdditional = isAdditionalConfigGroup(kg);
+          const isAdditional = isDependencyOnlyGroup(
+            kg,
+            gkPruneCtx.kgToShort,
+            gkPruneCtx.allChildShorts
+          );
           const hasSelection = isSingleChoice
-            ? (selectedIds[0] ?? 0) > 0
+            ? hasConfigGroupItemSelected(group, selectedIds)
             : selectedIds.length > 0;
+          const isKosmetikPositionRow = isKosmetikPositionGroupTitle(groupTitle);
           const showAdditionalPrompt = isAdditional && !hasSelection;
+          let rowHint = getRowHintFromArticleRules(
+            group,
+            selections,
+            optionGroups,
+            idx,
+            gkArticleRules
+          );
+          if (
+            isKosmetikPositionRow &&
+            hasSelection &&
+            rowHint &&
+            isKosmetikPositionPromptText(rowHint.text)
+          ) {
+            rowHint = null;
+          }
+          const showMessageBelow =
+            isKosmetikPositionRow && hasSelection
+              ? rowHint != null
+              : rowHint != null || showAdditionalPrompt;
 
           return (
             <div
@@ -1630,9 +1751,9 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
               }
               key={rowKey}
             >
-              {showAdditionalPrompt || !isAdditional ? (
+              {!isAdditional ? (
                 <div className="dimension-header jtl-config-header-label-only">
-                  {kg != null && !isAdditional ? (
+                  {kg != null ? (
                     <button
                       type="button"
                       className="info-icon jtl-option-info-trigger"
@@ -1650,16 +1771,8 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
                       i
                     </button>
                   ) : null}
-                  <span
-                    className={
-                      showAdditionalPrompt
-                        ? "jtl-config-additional-prompt"
-                        : "dimension-label jtl-config-field-label"
-                    }
-                  >
-                    {showAdditionalPrompt
-                      ? additionalSelectPrompt(groupTitle)
-                      : groupTitle || "Option"}
+                  <span className="dimension-label jtl-config-field-label">
+                    {groupTitle || "Option"}
                   </span>
                 </div>
               ) : null}
@@ -1812,6 +1925,74 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
                   </div>
                 </div>
               )}
+              {showMessageBelow ? (
+                <div className="jtl-config-row-message">
+                  {rowHint ? (
+                    <span
+                      className={
+                        rowHint.isError
+                          ? "jtl-config-row-hint jtl-config-row-hint--error"
+                          : "jtl-config-row-hint jtl-config-row-hint--info"
+                      }
+                      dangerouslySetInnerHTML={{
+                        __html: sanitizeGkHintHtml(rowHint.text),
+                      }}
+                    />
+                  ) : (
+                    <span className="jtl-config-additional-prompt">
+                      {additionalSelectPrompt(groupTitle)}
+                    </span>
+                  )}
+                </div>
+              ) : null}
+              {isKosmetikPositionRow &&
+              hasSelection &&
+              kosmetikAbstandFields.length > 0
+                ? kosmetikAbstandFields.map((field) => {
+                    const inputValue = readKosmetikAbstandInput(
+                      field,
+                      selections,
+                      kosmetikAbstandDraft
+                    );
+                    const fieldHint = getKosmetikAbstandFieldHint(field.kind);
+                    return (
+                      <div
+                        key={field.kind}
+                        className="jtl-config-kosmetik-abstand-block"
+                      >
+                        <div className="jtl-config-quantity-row">
+                          <span className="jtl-config-quantity-label-block">
+                            <span className="jtl-config-field-label">
+                              {field.label}
+                            </span>
+                          </span>
+                          <div className="jtl-config-quantity-input-wrap">
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              className="jtl-config-quantity-input"
+                              value={inputValue}
+                              placeholder=""
+                              aria-label={field.label}
+                              onChange={(e) =>
+                                handleKosmetikAbstandInput(field, e.target.value)
+                              }
+                              onBlur={(e) =>
+                                handleKosmetikAbstandBlur(field, e.target.value)
+                              }
+                            />
+                            <div className="jtl-config-kosmetik-abstand-hint">
+                              <span className="jtl-config-row-hint jtl-config-row-hint--error">
+                                {fieldHint}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                : null}
             </div>
           );
         })}

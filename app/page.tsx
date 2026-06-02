@@ -13,6 +13,8 @@ import {
   type ProductLightingPayload,
 } from "../lib/productLighting";
 import { parseMirrorUrlParams } from "../lib/urlParams";
+import { resolveJtlProductPageUrlFromSearch } from "../lib/jtlShop";
+import CanvasBackToProductButton from "../components/CanvasBackToProductButton";
 
 const MIN_MM = 400;
 const MAX_MM = 2800;
@@ -123,6 +125,10 @@ function HomePageContent() {
 
   // URL: id=kArtikel, n=artical_number, s=size (kKonfigitem), t=token, sid=session
   const urlParams = parseMirrorUrlParams(searchParams);
+  const productPageUrl = useMemo(
+    () => resolveJtlProductPageUrlFromSearch(searchParams),
+    [searchParams]
+  );
   const mirrorIdFromUrl = urlParams.artikelId;
   const mirrorArticalFromUrl = urlParams.articalNumber;
   const mirrorSizeFromUrl = urlParams.sizeKonfigItem;
@@ -416,6 +422,7 @@ function HomePageContent() {
       <main className="app-root">
         <div className="canvas-panel">
         <div className="canvas-wrapper" style={{ position: "relative" }}>
+          <CanvasBackToProductButton href={productPageUrl} />
           <MirrorScene
             widthMm={widthMm}
             heightMm={heightMm}

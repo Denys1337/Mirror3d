@@ -211,29 +211,29 @@ export type GroupSelectionSlice = {
   quantityMm?: number;
 };
 
-/** JTL buildConfiguration — eigenschaftwert 1601/1602 (мм як рядок). */
+/**
+ * eigenschaftwert 1601/1602 — лише заповнені мм (рядок).
+ * Якщо обидва порожні — undefined (не додавати в payload).
+ */
 export function buildKosmetikEigenschaftwert(input: {
   fields: KosmetikAbstandFieldView[];
   selections: GroupSelectionSlice[];
   draft: Record<KosmetikAbstandKind, string>;
   positionPicked: boolean;
-}): Record<string, string> {
-  if (!input.positionPicked) {
-    return { [KOSMETIK_EIGENSCHAFT_UNTEN]: "", [KOSMETIK_EIGENSCHAFT_SEITE]: "" };
-  }
-  const out: Record<string, string> = {
-    [KOSMETIK_EIGENSCHAFT_UNTEN]: "",
-    [KOSMETIK_EIGENSCHAFT_SEITE]: "",
-  };
+}): Record<string, string> | undefined {
+  if (!input.positionPicked) return undefined;
+
+  const out: Record<string, string> = {};
   for (const field of input.fields) {
     const key =
       field.kind === "unten"
         ? KOSMETIK_EIGENSCHAFT_UNTEN
         : KOSMETIK_EIGENSCHAFT_SEITE;
     const raw = readKosmetikAbstandInput(field, input.selections, input.draft);
-    out[key] = kosmetikAbstandDraftToJtl(raw, field);
+    const mm = kosmetikAbstandDraftToJtl(raw, field);
+    if (mm) out[key] = mm;
   }
-  return out;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 export { hasKosmetikPositionInSelections };

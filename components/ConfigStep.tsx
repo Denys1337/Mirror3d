@@ -870,6 +870,18 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
     const item = buildConfigurationItemMap(configGroups, opt, selections);
     const { customSizeConfigItem, customSizeConfigGroup, mirrorDims } =
       deriveEffectiveSizeContext(configGroups);
+    const positionPicked = hasKosmetikPositionInSelections(opt, selections);
+    const abstandFields = buildKosmetikAbstandFields(
+      opt,
+      mirrorDims.widthMm,
+      mirrorDims.heightMm
+    );
+    const eigenschaftwert = buildKosmetikEigenschaftwert({
+      fields: abstandFields,
+      selections,
+      draft: kosmetikAbstandDraft,
+      positionPicked,
+    });
 
     const body = buildAddToCartRequestBody({
       artikelId,
@@ -883,6 +895,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       customSizeConfigGroup: String(customSizeConfigGroup),
       widthMm: mirrorDims.widthMm,
       heightMm: mirrorDims.heightMm,
+      eigenschaftwert,
     });
 
     const res = await fetch("/api/add-to-cart", {
@@ -903,7 +916,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       );
     }
     window.location.href = data.url;
-  }, [configGroups, selections, productLightingPayload]);
+  }, [configGroups, selections, productLightingPayload, kosmetikAbstandDraft]);
 
   useImperativeHandle(ref, () => ({ addToCart }), [addToCart]);
 
@@ -1436,7 +1449,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       show: "1",
       kKundengruppe: "3",
       kSprache: "1",
-      eigenschaftwert,
+      ...(eigenschaftwert ? { eigenschaftwert } : {}),
       artical_number: articalNumber,
       data_file_exist: "1",
       mir_type: lighting.mir_type,

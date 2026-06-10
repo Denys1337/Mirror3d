@@ -510,13 +510,19 @@ function HomePageContent() {
           {activeOptionIcons.length > 0 ? (
             <div className="tool-option-icons" aria-label="Gewählte Optionen">
               {activeOptionIcons.map((icon) => (
-                <img
+                <div
                   key={icon.id}
-                  className="tool-option-icon"
-                  src={icon.src}
-                  alt=""
-                  aria-hidden="true"
-                />
+                  className="tool-option-icon-wrap"
+                  aria-label={icon.label}
+                >
+                  <img
+                    className="tool-option-icon"
+                    src={icon.src}
+                    alt=""
+                    aria-hidden="true"
+                  />
+                  <span className="tool-button-tooltip">{icon.label}</span>
+                </div>
               ))}
             </div>
           ) : null}

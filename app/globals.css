@@ -1115,8 +1115,15 @@ main.app-root {
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  pointer-events: none;
-  user-select: none;
+}
+
+.tool-option-icon-wrap {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .tool-option-icon {
@@ -1125,6 +1132,7 @@ main.app-root {
   display: block;
   object-fit: contain;
   pointer-events: none;
+  user-select: none;
 }
 
 .camera-overlay-controls {
@@ -1274,7 +1282,8 @@ main.app-root {
   z-index: 30;
 }
 
-.tool-button:hover .tool-button-tooltip {
+.tool-button:hover .tool-button-tooltip,
+.tool-option-icon-wrap:hover .tool-button-tooltip {
   opacity: 1;
 }
 

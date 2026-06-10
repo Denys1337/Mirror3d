@@ -120,6 +120,25 @@ const SIZE_LIMITS: Record<
   },
 };
 
+type SizeLimits = {
+  b_min: number;
+  b_max: number;
+  h_min: number;
+  h_max: number;
+};
+
+function resolveSizeLimits(mirrorSize: string | null): SizeLimits {
+  if (mirrorSize && SIZE_LIMITS[mirrorSize]) {
+    return SIZE_LIMITS[mirrorSize];
+  }
+  return {
+    b_min: MIN_MM,
+    b_max: MAX_MM,
+    h_min: MIN_MM,
+    h_max: MAX_MM,
+  };
+}
+
 function HomePageContent() {
   const searchParams = useSearchParams();
 
@@ -132,19 +151,20 @@ function HomePageContent() {
   const mirrorIdFromUrl = urlParams.artikelId;
   const mirrorArticalFromUrl = urlParams.articalNumber;
   const mirrorSizeFromUrl = urlParams.sizeKonfigItem;
+  const initialSizeLimits = resolveSizeLimits(mirrorSizeFromUrl);
 
   const [mirrorId, setMirrorId] = useState<string | null>(null);
   const [mirrorSize, setMirrorSize] = useState<string | null>(null);
 
-  const [widthMm, setWidthMm] = useState(900);
-  const [heightMm, setHeightMm] = useState(1600);
+  const [widthMm, setWidthMm] = useState(initialSizeLimits.b_min);
+  const [heightMm, setHeightMm] = useState(initialSizeLimits.h_min);
   // Розміри, які відправляємо в JTL (commit only: slider mouse up / input blur)
-  const [committedWidthMm, setCommittedWidthMm] = useState(900);
-  const [committedHeightMm, setCommittedHeightMm] = useState(1600);
+  const [committedWidthMm, setCommittedWidthMm] = useState(initialSizeLimits.b_min);
+  const [committedHeightMm, setCommittedHeightMm] = useState(initialSizeLimits.h_min);
   const [useManualWidth, setUseManualWidth] = useState(false);
   const [useManualHeight, setUseManualHeight] = useState(false);
-  const [inputWidthMm, setInputWidthMm] = useState("900");
-  const [inputHeightMm, setInputHeightMm] = useState("1600");
+  const [inputWidthMm, setInputWidthMm] = useState(String(initialSizeLimits.b_min));
+  const [inputHeightMm, setInputHeightMm] = useState(String(initialSizeLimits.h_min));
   const [showWall, setShowWall] = useState(true);
   const [showClock, setShowClock] = useState(false);
   const [clockCorner, setClockCorner] = useState<"top-left" | "top-center" | "top-right" | "right-center" | "bottom-right" | "bottom-center" | "bottom-left" | "left-center" | null>(null);
@@ -203,18 +223,10 @@ function HomePageContent() {
     window.sessionStorage.setItem("mirror3d-active-step", String(activeStep));
   }, [activeStep, stepRestored]);
 
-  // Обмеження по розмірах залежно від mirrorSizeFromUrl
-  const sizeLimits = useMemo(() => {
-    if (mirrorSizeFromUrl && SIZE_LIMITS[mirrorSizeFromUrl]) {
-      return SIZE_LIMITS[mirrorSizeFromUrl];
-    }
-    return {
-      b_min: MIN_MM,
-      b_max: MAX_MM,
-      h_min: MIN_MM,
-      h_max: MAX_MM,
-    };
-  }, [mirrorSizeFromUrl]);
+  const sizeLimits = useMemo(
+    () => resolveSizeLimits(mirrorSizeFromUrl),
+    [mirrorSizeFromUrl]
+  );
 
   // Ініціалізуємо глобальну конфігурацію з URL (для сумісності з іншими скриптами)
   useEffect(() => {

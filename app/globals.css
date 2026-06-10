@@ -1295,14 +1295,42 @@ main.app-root {
   border: 1px solid rgba(203, 213, 225, 1);
 }
 
+.controls-panel .config-jtl-compact .jtl-single-select-trigger-row {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+}
+
 .controls-panel .config-jtl-compact .jtl-single-select-button {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   border: none;
   background: transparent;
+}
+
+.controls-panel .config-jtl-compact .jtl-single-select-clear {
+  flex-shrink: 0;
+  align-self: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(100, 116, 139, 1);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.controls-panel .config-jtl-compact .jtl-single-select-clear:hover {
+  background: rgba(241, 245, 249, 1);
+  color: rgba(51, 65, 85, 1);
 }
 
 .controls-panel .config-jtl-compact .jtl-single-select-button .jtl-single-select-button-text {

@@ -5,8 +5,6 @@ export type KosmetikAbstandKind = "unten" | "seite";
 export const KOSMETIK_EIGENSCHAFT_UNTEN = "1601";
 export const KOSMETIK_EIGENSCHAFT_SEITE = "1602";
 
-const MIN_MIRROR_MM = 480;
-
 export type KosmetikAbstandFieldView = {
   kind: KosmetikAbstandKind;
   label: string;
@@ -151,9 +149,9 @@ export function buildKosmetikAbstandFields(
 /** Статична червона підказка під полем Abstand (завжди під інпутом). */
 export function getKosmetikAbstandFieldHint(kind: KosmetikAbstandKind): string {
   if (kind === "unten") {
-    return `Der Spiegel sollte mindestens ${MIN_MIRROR_MM} mm hoch sein.`;
+    return "Der Abstand von unten muß zwischen 240 und 360 mm liegen.";
   }
-  return `Der Spiegel sollte mindestens ${MIN_MIRROR_MM} mm breit sein.`;
+  return "Der Spiegel sollte mindestens 480 mm breit sein.";
 }
 
 const EMPTY_KOSMETIK_DRAFT: Record<KosmetikAbstandKind, string> = {

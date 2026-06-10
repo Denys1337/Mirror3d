@@ -503,6 +503,146 @@ function ruleAppliesToDisplayRow(
   return isTriggerRow || isTargetRow;
 }
 
+export type ConfiguratorStepGroupMap = {
+  2: Set<number>;
+  3: Set<number>;
+  4: Set<number>;
+};
+
+export function getConfiguratorStepForKonfigGroup(
+  kg: number,
+  stepGroupMap: ConfiguratorStepGroupMap | null
+): 2 | 3 | 4 | null {
+  if (!stepGroupMap) return null;
+  for (const step of [2, 3, 4] as const) {
+    if (stepGroupMap[step].has(kg)) return step;
+  }
+  return null;
+}
+
+export function areConfigGroupsOnSameConfiguratorStep(
+  parentKg: number,
+  childKg: number,
+  stepGroupMap: ConfiguratorStepGroupMap | null
+): boolean {
+  if (!stepGroupMap) return true;
+  const parentStep = getConfiguratorStepForKonfigGroup(parentKg, stepGroupMap);
+  const childStep = getConfiguratorStepForKonfigGroup(childKg, stepGroupMap);
+  if (parentStep == null || childStep == null) return true;
+  return parentStep === childStep;
+}
+
+type ConfigGroupForParentLookup = {
+  kKonfiggruppe?: number;
+  oSprache?: { cName?: string };
+  cKommentar?: string | null;
+  oItem_arr: { kKonfigitem: number; cName: string }[];
+};
+
+/** Група з опцією-тригером, що відкриває дочірню залежну категорію (gruppeMap). */
+export function findTriggeringParentGroupIndex(
+  childGroupIndex: number,
+  optionGroups: ConfigGroupForParentLookup[],
+  selections: { groupIndex: number; selectedItemIds: number[] }[],
+  gruppeMap: GkGruppeMap,
+  kgToShort: Map<number, string>
+): number | null {
+  const child = optionGroups[childGroupIndex];
+  const childKg = child?.kKonfiggruppe;
+  if (childKg == null) return null;
+  const childShort =
+    kgToShort.get(childKg) ??
+    normalizeGkKey(child.oSprache?.cName ?? child.cKommentar ?? "");
+  if (!childShort) return null;
+
+  const parentItemKeys = new Set<string>();
+  for (const [mapKey, entry] of Object.entries(gruppeMap)) {
+    if (!mapKey.trim()) continue;
+    for (const short of entry.konfiggruppe2short ?? []) {
+      if (gkShortsMatch(normalizeGkKey(short), childShort)) {
+        parentItemKeys.add(normalizeGkKey(mapKey));
+      }
+    }
+  }
+  if (!parentItemKeys.size) return null;
+
+  for (const sel of selections) {
+    const group = optionGroups[sel.groupIndex];
+    if (!group) continue;
+    for (const id of sel.selectedItemIds) {
+      if (id <= 0) continue;
+      const item = group.oItem_arr.find((it) => it.kKonfigitem === id);
+      if (!item) continue;
+      const k = normalizeGkKey(item.cName);
+      for (const pk of parentItemKeys) {
+        if (gkShortsMatch(k, pk)) return sel.groupIndex;
+      }
+    }
+  }
+
+  for (let i = 0; i < optionGroups.length; i++) {
+    const group = optionGroups[i];
+    for (const item of group.oItem_arr) {
+      const k = normalizeGkKey(item.cName);
+      for (const pk of parentItemKeys) {
+        if (gkShortsMatch(k, pk)) return i;
+      }
+    }
+  }
+  return null;
+}
+
+function findParentGroupIndexForOperant0Rule(
+  ruleName: string,
+  optionGroups: ConfigGroupForParentLookup[],
+  selections: { groupIndex: number; selectedItemIds: number[] }[]
+): number | null {
+  for (const sel of selections) {
+    const group = optionGroups[sel.groupIndex];
+    if (!group) continue;
+    for (const id of sel.selectedItemIds) {
+      if (id <= 0) continue;
+      const item = group.oItem_arr.find((it) => it.kKonfigitem === id);
+      if (!item) continue;
+      if (gkShortsMatch(normalizeGkKey(item.cName), ruleName)) {
+        return sel.groupIndex;
+      }
+    }
+  }
+  for (let i = 0; i < optionGroups.length; i++) {
+    const group = optionGroups[i];
+    const hasTriggerItem = group.oItem_arr.some((it) =>
+      gkShortsMatch(normalizeGkKey(it.cName), ruleName)
+    );
+    if (hasTriggerItem) return i;
+  }
+  return null;
+}
+
+export function shouldSuppressDependentChildRowMessage(
+  childGroupIndex: number,
+  childKg: number | undefined,
+  optionGroups: ConfigGroupForParentLookup[],
+  selections: { groupIndex: number; selectedItemIds: number[] }[],
+  gruppeMap: GkGruppeMap,
+  kgToShort: Map<number, string>,
+  stepGroupMap: ConfiguratorStepGroupMap | null,
+  isAdditional: boolean
+): boolean {
+  if (!isAdditional || childKg == null) return false;
+  const parentIdx = findTriggeringParentGroupIndex(
+    childGroupIndex,
+    optionGroups,
+    selections,
+    gruppeMap,
+    kgToShort
+  );
+  if (parentIdx == null) return false;
+  const parentKg = optionGroups[parentIdx]?.kKonfiggruppe;
+  if (parentKg == null) return false;
+  return areConfigGroupsOnSameConfiguratorStep(parentKg, childKg, stepGroupMap);
+}
+
 export function getRowHintFromArticleRules(
   group: {
     kKonfiggruppe?: number;
@@ -513,7 +653,8 @@ export function getRowHintFromArticleRules(
   selections: { groupIndex: number; selectedItemIds: number[] }[],
   optionGroups: typeof group[],
   groupIndex: number,
-  rules: GkArticleRule[]
+  rules: GkArticleRule[],
+  stepGroupMap: ConfiguratorStepGroupMap | null = null
 ): GkRowHint | null {
   const groupTitle = group.oSprache?.cName ?? group.cKommentar ?? "";
   const groupShort = normalizeGkKey(groupTitle) || "";
@@ -558,6 +699,41 @@ export function getRowHintFromArticleRules(
       )
     ) {
       continue;
+    }
+
+    // operant "0": на одному кроці підказку показуємо лише на батьківському рядку.
+    if (operant === "0" && stepGroupMap) {
+      const isTriggerRow = selectedInGroupShorts.some((s) =>
+        gkShortsMatch(s, ruleName)
+      );
+      const isTargetGroup = targets.some((t) => gkShortsMatch(t, groupShort));
+      const hasTargetItem = groupItemShorts.some((s) =>
+        targets.some((t) => gkShortsMatch(s, t))
+      );
+      const isChildTargetOnly =
+        (isTargetGroup || hasTargetItem) && !isTriggerRow;
+      if (isChildTargetOnly) {
+        const parentIdx = findParentGroupIndexForOperant0Rule(
+          ruleName,
+          optionGroups,
+          selections
+        );
+        if (parentIdx != null && parentIdx !== groupIndex) {
+          const parentKg = optionGroups[parentIdx]?.kKonfiggruppe;
+          const childKg = group.kKonfiggruppe;
+          if (
+            parentKg != null &&
+            childKg != null &&
+            areConfigGroupsOnSameConfiguratorStep(
+              parentKg,
+              childKg,
+              stepGroupMap
+            )
+          ) {
+            continue;
+          }
+        }
+      }
     }
 
     // Рядок позиції вже заповнений — не показувати operant "0" під ним.

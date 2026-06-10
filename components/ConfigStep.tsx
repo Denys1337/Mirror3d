@@ -26,6 +26,7 @@ import {
   sanitizeGkHintHtml,
   selectedItemKeysFromSelections,
   shouldShowConfigGroupFromGk,
+  shouldSuppressDependentChildRowMessage,
   type GkArticleRule,
   type GkGruppeMap,
 } from "../lib/gkJson";
@@ -147,6 +148,8 @@ type RawConfigGroup = {
 
 type RawConfigItem = {
   kKonfigitem: number;
+  /** JTL-Artikel der Konfigurationsoption (z. B. 49750 für PIN-Variante). */
+  kArtikel?: number;
   fPreis?: [number, number];
   /** [0] Brutto (як на сайті), [1] Netto */
   fPreisLocalized?: [string, string];
@@ -163,6 +166,8 @@ type RawConfigItem = {
 type GroupSelection = {
   groupIndex: number;
   selectedItemIds: number[]; // kKonfigitem
+  /** Користувач натиснув «Bitte auswählen» / × — не відновлювати з API */
+  userCleared?: boolean;
   /** мм — Abstand Kosmetikspiegel (JTL bAnzahl) */
   quantityMm?: number;
 };
@@ -362,6 +367,7 @@ function resolveProductIdsFromUrl(): {
 
 /** Лише для 3D-превʼю (колір температури), не для видимості селектів. */
 const LICHTFARBE_KONFIG_GRUPPE = 261;
+const SINGLE_SELECT_PLACEHOLDER = "Bitte auswählen";
 
 function additionalSelectPrompt(groupTitle: string): string {
   const title = groupTitle.trim() || "Option";
@@ -433,15 +439,153 @@ function pruneSelectionsForHiddenRows(
 }
 
 /**
- * Після load_konfig JTL часто ставить bAktiv лише на поточно обраному пункті; інші стають false.
- * Якщо тоді disabled={!item.bAktiv}, переключити селект неможливо — тому для single-select (nMax===1)
- * усі опції лишаються доступними; для multiselect логіку bAktiv зберігаємо.
+ * Якщо JTL уже позначив активні опції — лише вони.
+ * Якщо ще жодна не активна (початковий GET) — усі пункти зі списку доступні.
  */
 function itemChoosable(group: RawConfigGroup, item: RawConfigItem): boolean {
-  if (group.nMax === 1) return true;
   const anyActive = group.oItem_arr.some((i) => i.bAktiv);
   if (!anyActive) return true;
   return item.bAktiv;
+}
+
+function isBluetoothConfigGroup(group: RawConfigGroup): boolean {
+  if (group.kKonfiggruppe === 29) return true;
+  const t = plainLabelFromApi(
+    group.oSprache?.cName ?? group.cKommentar ?? ""
+  ).toLowerCase();
+  return t.includes("bluetooth");
+}
+
+/**
+ * Як у PHP-шаблоні магазину:
+ * - PIN:XXXX лише для відповідного artical_number;
+ * - варіант з kArtikel === основний продукт (напр. 2524 на дзеркалі 49750);
+ * - для Bluetooth без PIN на «чужому» продукті — Standard, без WHD Professional.
+ */
+function filterConfigItemsForProduct(
+  items: RawConfigItem[],
+  group: RawConfigGroup,
+  artikelId: string,
+  articalNumber: string
+): RawConfigItem[] {
+  if (!items.length) return items;
+
+  const mainArtikelId = Number.parseInt(artikelId, 10);
+  const artNr = articalNumber.trim();
+
+  const afterPin = items.filter((item) => {
+    const name = plainLabelFromApi(item.cName);
+    const pinMatch = name.match(/PIN:\s*(\d+)/i);
+    if (pinMatch) return pinMatch[1] === artNr;
+    return true;
+  });
+  if (!afterPin.length) return items;
+
+  if (Number.isFinite(mainArtikelId) && mainArtikelId > 0) {
+    const mainProductOptions = afterPin.filter(
+      (item) => item.kArtikel === mainArtikelId
+    );
+    if (mainProductOptions.length > 0) return mainProductOptions;
+  }
+
+  if (!isBluetoothConfigGroup(group)) return afterPin;
+
+  const withoutPin = afterPin.filter((item) => {
+    const name = plainLabelFromApi(item.cName);
+    return !/PIN:\s*\d+/i.test(name);
+  });
+
+  const standard = withoutPin.filter((item) => {
+    const t = plainLabelFromApi(item.cName)
+      .toLowerCase()
+      .replace(/ß/g, "ss")
+      .replace(/ö/g, "oe");
+    return !/professional|whd|korperschall/.test(t);
+  });
+
+  if (standard.length > 0) return standard;
+  if (withoutPin.length > 0) return withoutPin;
+  return afterPin;
+}
+
+/** Як data-is-artikel на сайті: реальні доп. артикули з ціною або зображенням. */
+function isShopArticleOption(item: RawConfigItem): boolean {
+  const label = plainLabelFromApi(item.cName).trim();
+  if (!label) return false;
+  const n = label
+    .toLowerCase()
+    .replace(/ß/g, "ss")
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue");
+  if (n.includes("bitte") && (n.includes("waehlen") || n.includes("auswaehlen"))) {
+    return false;
+  }
+
+  if (optionDisplayPrice(item)) return true;
+
+  const img = item.cBildPfad?.trim() ?? "";
+  if (img && !/keinbild/i.test(img)) return true;
+
+  return false;
+}
+
+/** Список kKonfigitem, доступних після buildConfiguration (до звуження load_konfig). */
+function collectChoosableItemIdsByGroupIndex(
+  groups: RawConfigGroup[],
+  artikelId: string,
+  articalNumber: string
+): Map<number, Set<number>> {
+  const map = new Map<number, Set<number>>();
+  groups.slice(1).forEach((group, index) => {
+    const scoped = filterConfigItemsForProduct(
+      group.oItem_arr,
+      group,
+      artikelId,
+      articalNumber
+    );
+    const articleIds = scoped
+      .filter((item) => item.bAktiv && isShopArticleOption(item))
+      .map((item) => item.kKonfigitem);
+    const ids =
+      articleIds.length > 0
+        ? articleIds
+        : scoped.filter((item) => item.bAktiv).map((item) => item.kKonfigitem);
+    if (ids.length > 0) map.set(index, new Set(ids));
+  });
+  return map;
+}
+
+function listSelectableItemsForGroup(
+  group: RawConfigGroup,
+  groupIndex: number,
+  choosableIds: Map<number, Set<number>>,
+  artikelId: string,
+  articalNumber: string
+): RawConfigItem[] {
+  const scopedAll = filterConfigItemsForProduct(
+    group.oItem_arr,
+    group,
+    artikelId,
+    articalNumber
+  );
+
+  const snap = choosableIds.get(groupIndex);
+  if (snap && snap.size > 0) {
+    const fromSnap = scopedAll.filter((item) => snap.has(item.kKonfigitem));
+    if (fromSnap.length > 0) return fromSnap;
+  }
+
+  const active = scopedAll.filter((item) => item.bAktiv);
+  if (active.length > 0) {
+    const activeArticles = active.filter(isShopArticleOption);
+    return activeArticles.length > 0 ? activeArticles : active;
+  }
+
+  const articles = scopedAll.filter(isShopArticleOption);
+  if (articles.length > 0) return articles;
+
+  return scopedAll;
 }
 
 function extractJtlToken(data: unknown): string | null {
@@ -602,6 +746,8 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
   const singleDropdownRootRef = useRef<HTMLDivElement | null>(null);
   const optionInfoInlineRootRef = useRef<HTMLDivElement | null>(null);
   const lastSentSizeKeyRef = useRef<string | null>(null);
+  const choosableItemIdsRef = useRef<Map<number, Set<number>>>(new Map());
+  const { artikelId, articalNumber } = resolveProductIdsFromUrl();
 
   // Витягуємо response.oKonfig_arr через API, щоб не імпортувати великий JSON напряму
   useEffect(() => {
@@ -628,6 +774,11 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
         }
         if (!cancelled) {
           console.log("Loaded config groups:", response.oKonfig_arr.length);
+          choosableItemIdsRef.current = collectChoosableItemIdsByGroupIndex(
+            response.oKonfig_arr,
+            artikelId,
+            articalNumber
+          );
           setConfigGroups(response.oKonfig_arr);
           if (onManufacturerChange) {
             onManufacturerChange(extractManufacturerFromUnknown(data));
@@ -1211,9 +1362,8 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
   ): Record<string, string> | null => {
     if (group.kKonfiggruppe == null) return null;
 
-    const sel =
-      nextSelections.find((s) => s.groupIndex === groupIndex)?.selectedItemIds ??
-      [];
+    const selEntry = nextSelections.find((s) => s.groupIndex === groupIndex);
+    const sel = selEntry?.selectedItemIds ?? [];
 
     const existsInGroup = (id: number) =>
       id > 0 && group.oItem_arr.some((i) => i.kKonfigitem === id);
@@ -1221,6 +1371,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
     const activeFromApi = group.oItem_arr.filter((i) => i.bAktiv);
 
     if (group.nMax === 1) {
+      if (selEntry?.userCleared) return null;
       const s0 = sel[0];
       if (s0 != null && existsInGroup(s0)) {
         return { "0": String(s0) };
@@ -1306,8 +1457,16 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
         return { groupIndex: index, selectedItemIds: [] };
       }
       const activeItems = group.oItem_arr.filter((item) => item.bAktiv);
-      const prevIds =
-        prev.find((s) => s.groupIndex === index)?.selectedItemIds ?? [];
+      const prevSel = prev.find((s) => s.groupIndex === index);
+      const prevIds = prevSel?.selectedItemIds ?? [];
+
+      if (group.nMax === 1 && prevSel?.userCleared) {
+        return {
+          groupIndex: index,
+          selectedItemIds: [],
+          userCleared: true,
+        };
+      }
 
       if (group.nMax === 1 && prevIds.length === 1) {
         const pid = prevIds[0];
@@ -1503,6 +1662,12 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       return;
     }
 
+    choosableItemIdsRef.current = collectChoosableItemIdsByGroupIndex(
+      newGroups,
+      artikelId,
+      articalNumber
+    );
+
     /* Одразу з відповіді buildConfiguration: новий список груп + узгоджений вибір → перерендер селектів */
     const mergedAfterBuild = mergeSelectionsAfterKonfigResponse(
       nextSelections,
@@ -1627,7 +1792,11 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
     setSelections((prev) => {
       const next = prev.map((g) =>
         g.groupIndex === groupIdx
-          ? { ...g, selectedItemIds: itemId ? [itemId] : [] }
+          ? {
+              ...g,
+              selectedItemIds: itemId ? [itemId] : [],
+              userCleared: !itemId,
+            }
           : g
       );
       const pruned = pruneSelectionsForHiddenRows(optionGroups, next, gkPruneCtxAllSteps);
@@ -1712,6 +1881,14 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
           if (!shouldShowConfigGroupRow(group, gkPruneCtx)) return null;
           if (!group.oItem_arr?.length) return null;
 
+          const selectableItems = listSelectableItemsForGroup(
+            group,
+            idx,
+            choosableItemIdsRef.current,
+            artikelId,
+            articalNumber
+          );
+
           const selection = selections.find((s) => s.groupIndex === idx);
           const selectedIds = selection?.selectedItemIds ?? [];
           const isSingleChoice = group.nMax === 1;
@@ -1734,13 +1911,15 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
             ? hasConfigGroupItemSelected(group, selectedIds)
             : selectedIds.length > 0;
           const isKosmetikPositionRow = isKosmetikPositionGroupTitle(groupTitle);
-          const showAdditionalPrompt = isAdditional && !hasSelection;
+          const showAdditionalHighlight = isAdditional && !hasSelection;
+          let showAdditionalPrompt = showAdditionalHighlight;
           let rowHint = getRowHintFromArticleRules(
             group,
             selections,
             optionGroups,
             idx,
-            gkArticleRules
+            gkArticleRules,
+            stepGroupMap
           );
           if (
             isKosmetikPositionRow &&
@@ -1750,6 +1929,22 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
           ) {
             rowHint = null;
           }
+          if (
+            shouldSuppressDependentChildRowMessage(
+              idx,
+              kg,
+              optionGroups,
+              selections,
+              gkGruppeMap,
+              gkPruneCtx.kgToShort,
+              stepGroupMap,
+              isAdditional
+            )
+          ) {
+            rowHint = null;
+            showAdditionalPrompt = false;
+          }
+          // Підсвітка дочірнього селекта — завжди, навіть якщо текст підказки на батьківському рядку.
           const showMessageBelow =
             isKosmetikPositionRow && hasSelection
               ? rowHint != null
@@ -1760,7 +1955,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
               className={
                 "dimension-group jtl-config-group" +
                 (isAdditional ? " jtl-config-additional" : "") +
-                (showAdditionalPrompt ? " jtl-config-additional--empty" : "")
+                (showAdditionalHighlight ? " jtl-config-additional--empty" : "")
               }
               key={rowKey}
             >
@@ -1814,7 +2009,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
                         const selectedText =
                           selectedItem != null
                             ? optionLabel(selectedItem)
-                            : "Bitte wählen";
+                            : SINGLE_SELECT_PLACEHOLDER;
 
                         const toggleOpen = () => {
                           setSingleOpenGroupIdx((prev) =>
@@ -1822,38 +2017,73 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
                           );
                         };
 
+                        const clearSelection = () => {
+                          handleSingleSelectChange(idx, 0);
+                          setSingleOpenGroupIdx(null);
+                        };
+
                         return (
                           <>
-                            <button
-                              type="button"
-                              className="dimension-manual-input jtl-config-select jtl-single-select-button"
-                              aria-label={groupTitle || "Option"}
-                              title={groupTitle || undefined}
-                              onClick={toggleOpen}
-                            >
-                              {selectedImg ? (
-                                <img
-                                  className="jtl-option-thumb"
-                                  src={selectedImg}
-                                  alt=""
-                                  aria-hidden="true"
-                                />
-                              ) : null}
-                              <span className="jtl-single-select-button-text">
+                            <div className="jtl-single-select-trigger-row">
+                              <button
+                                type="button"
+                                className="dimension-manual-input jtl-config-select jtl-single-select-button"
+                                aria-label={groupTitle || "Option"}
+                                title={groupTitle || undefined}
+                                onClick={toggleOpen}
+                              >
+                                {selectedImg ? (
+                                  <img
+                                    className="jtl-option-thumb"
+                                    src={selectedImg}
+                                    alt=""
+                                    aria-hidden="true"
+                                  />
+                                ) : null}
+                              <span
+                                className={
+                                  "jtl-single-select-button-text" +
+                                  (selectedItem == null ? " is-placeholder" : "")
+                                }
+                              >
                                 {selectedText}
                               </span>
-                              <span
-                                className="jtl-single-select-caret"
-                                aria-hidden="true"
-                              >
-                                ▾
-                              </span>
-                            </button>
+                                <span
+                                  className="jtl-single-select-caret"
+                                  aria-hidden="true"
+                                >
+                                  ▾
+                                </span>
+                              </button>
+                              {selectedItem != null ? (
+                                <button
+                                  type="button"
+                                  className="jtl-single-select-clear"
+                                  aria-label="Auswahl aufheben"
+                                  title="Auswahl aufheben"
+                                  onClick={clearSelection}
+                                >
+                                  ×
+                                </button>
+                              ) : null}
+                            </div>
 
                             {singleOpenGroupIdx === idx ? (
                               <ul className="jtl-single-select-menu" role="listbox">
-                                {group.oItem_arr.map((item) => {
-                                  const disabled = !itemChoosable(group, item);
+                                {selectedItem != null ? (
+                                  <li key="__clear__">
+                                    <button
+                                      type="button"
+                                      className="jtl-single-select-option is-placeholder"
+                                      onClick={clearSelection}
+                                    >
+                                      <span className="jtl-single-select-option-text">
+                                        {SINGLE_SELECT_PLACEHOLDER}
+                                      </span>
+                                    </button>
+                                  </li>
+                                ) : null}
+                                {selectableItems.map((item) => {
                                   const itemImg = buildImageUrl(item.cBildPfad);
                                   const active =
                                     item.kKonfigitem === selectedIds[0];
@@ -1863,12 +2093,17 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
                                         type="button"
                                         className={
                                           "jtl-single-select-option" +
-                                          (disabled ? " is-disabled" : "") +
                                           (active ? " is-active" : "")
                                         }
-                                        disabled={disabled}
                                         onClick={() => {
-                                          handleSingleSelectChange(idx, item.kKonfigitem);
+                                          if (active) {
+                                            clearSelection();
+                                            return;
+                                          }
+                                          handleSingleSelectChange(
+                                            idx,
+                                            item.kKonfigitem
+                                          );
                                           setSingleOpenGroupIdx(null);
                                         }}
                                       >
@@ -1903,11 +2138,10 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
                   }
                 >
                   <div className="options-multiselect jtl-options-multiselect jtl-options-multiselect--grow">
-                    {group.oItem_arr.map((item) => {
+                    {selectableItems.map((item) => {
                       const checked = selectedIds.includes(
                         item.kKonfigitem
                       );
-                      const disabled = !itemChoosable(group, item);
                       const itemImg = buildImageUrl(item.cBildPfad);
                       return (
                         <label
@@ -1917,9 +2151,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
                           <input
                             type="checkbox"
                             checked={checked}
-                            disabled={disabled}
                             onChange={() => {
-                              if (disabled) return;
                               handleMultiToggle(idx, item.kKonfigitem);
                             }}
                           />

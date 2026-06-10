@@ -7,6 +7,7 @@ import ConfigStep, {
   type ConfigStepHandle,
   type ConfigSummaryPayload,
 } from "../components/ConfigStep";
+import type { ConfigOptionIcon } from "../lib/configOptionIcons";
 import { resolveProductAttributesId } from "../lib/productIds";
 import {
   parseProductLightingPayload,
@@ -204,6 +205,9 @@ function HomePageContent() {
   const [stepRestored, setStepRestored] = useState(false);
   const [cartLoading, setCartLoading] = useState(false);
   const [cartError, setCartError] = useState<string | null>(null);
+  const [activeOptionIcons, setActiveOptionIcons] = useState<ConfigOptionIcon[]>(
+    []
+  );
   const configStepRef = useRef<ConfigStepHandle>(null);
 
   // Restore step after mount (avoid SSR/client hydration mismatch).
@@ -461,6 +465,7 @@ function HomePageContent() {
             showShelf={showShelf}
             shelfLengthMm={shelfLengthMm}
           />
+          <div className="canvas-tool-column">
           <div className="tool-controls">
             <button
               className={`tool-button ${wallToolActive ? "active" : ""}`}
@@ -501,6 +506,20 @@ function HomePageContent() {
                 {rulerToolActive ? "Bemarkungen ausblenden" : "Bemarkungen einblenden"}
               </span>
             </button>
+          </div>
+          {activeOptionIcons.length > 0 ? (
+            <div className="tool-option-icons" aria-label="Gewählte Optionen">
+              {activeOptionIcons.map((icon) => (
+                <img
+                  key={icon.id}
+                  className="tool-option-icon"
+                  src={icon.src}
+                  alt=""
+                  aria-hidden="true"
+                />
+              ))}
+            </div>
+          ) : null}
           </div>
           <div className="camera-overlay-controls">
             <div className="camera-overlay-title">
@@ -1085,6 +1104,7 @@ function HomePageContent() {
             onManufacturerChange={setManufacturerName}
             onLightTemperatureChange={setLightTemperatureK}
             onAmbientBacklightChange={setAmbientBacklightMode}
+            onOptionIconsChange={setActiveOptionIcons}
             activeStep={activeStep}
             productLightingPayload={productLightingPayload}
           />

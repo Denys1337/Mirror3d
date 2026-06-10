@@ -43,6 +43,10 @@ import {
   type KosmetikAbstandKind,
 } from "../lib/kosmetikAbstand";
 import {
+  resolveActiveConfigOptionIcons,
+  type ConfigOptionIcon,
+} from "../lib/configOptionIcons";
+import {
   buildConfigApiPath,
   parseMirrorUrlParams,
   resolveProductIdsFromUrlParams,
@@ -189,6 +193,7 @@ type Props = {
       | "top-bottom"
       | "all"
   ) => void;
+  onOptionIconsChange?: (icons: ConfigOptionIcon[]) => void;
   widthMm?: number;
   heightMm?: number;
   activeStep?: number;
@@ -530,7 +535,7 @@ function isShopArticleOption(item: RawConfigItem): boolean {
   return false;
 }
 
-/** Список kKonfigitem, доступних після buildConfiguration (до звуження load_konfig). */
+/** Усі kKonfigitem групи для цього продукту (не лише поточні bAktiv від JTL). */
 function collectChoosableItemIdsByGroupIndex(
   groups: RawConfigGroup[],
   artikelId: string,
@@ -544,16 +549,25 @@ function collectChoosableItemIdsByGroupIndex(
       artikelId,
       articalNumber
     );
-    const articleIds = scoped
-      .filter((item) => item.bAktiv && isShopArticleOption(item))
-      .map((item) => item.kKonfigitem);
-    const ids =
-      articleIds.length > 0
-        ? articleIds
-        : scoped.filter((item) => item.bAktiv).map((item) => item.kKonfigitem);
+    const articles = scoped.filter(isShopArticleOption);
+    const pool = articles.length > 0 ? articles : scoped;
+    const ids = pool
+      .map((item) => item.kKonfigitem)
+      .filter((id) => id > 0);
     if (ids.length > 0) map.set(index, new Set(ids));
   });
   return map;
+}
+
+function mergeChoosableItemIdMaps(
+  prev: Map<number, Set<number>>,
+  next: Map<number, Set<number>>
+): Map<number, Set<number>> {
+  const out = new Map<number, Set<number>>();
+  for (const key of new Set([...prev.keys(), ...next.keys()])) {
+    out.set(key, new Set([...(prev.get(key) ?? []), ...(next.get(key) ?? [])]));
+  }
+  return out;
 }
 
 function listSelectableItemsForGroup(
@@ -720,6 +734,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
     onManufacturerChange,
     onLightTemperatureChange,
     onAmbientBacklightChange,
+    onOptionIconsChange,
     widthMm: widthMmFromStep1,
     heightMm: heightMmFromStep1,
     activeStep = 2,
@@ -774,10 +789,13 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
         }
         if (!cancelled) {
           console.log("Loaded config groups:", response.oKonfig_arr.length);
-          choosableItemIdsRef.current = collectChoosableItemIdsByGroupIndex(
-            response.oKonfig_arr,
-            artikelId,
-            articalNumber
+          choosableItemIdsRef.current = mergeChoosableItemIdMaps(
+            choosableItemIdsRef.current,
+            collectChoosableItemIdsByGroupIndex(
+              response.oKonfig_arr,
+              artikelId,
+              articalNumber
+            )
           );
           setConfigGroups(response.oKonfig_arr);
           if (onManufacturerChange) {
@@ -1153,6 +1171,11 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       lines,
     });
   }, [configGroups, onSummaryChange, selections, widthMmFromStep1, heightMmFromStep1]);
+
+  useEffect(() => {
+    if (!onOptionIconsChange) return;
+    onOptionIconsChange(resolveActiveConfigOptionIcons(optionGroups, selections));
+  }, [optionGroups, selections, onOptionIconsChange]);
 
   const visibleGroupIndices = useMemo(() => {
     // Поки мапа не завантажилась — не ламаємо UX: на кроках 2..4 показуємо всі групи.
@@ -1662,10 +1685,13 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       return;
     }
 
-    choosableItemIdsRef.current = collectChoosableItemIdsByGroupIndex(
-      newGroups,
-      artikelId,
-      articalNumber
+    choosableItemIdsRef.current = mergeChoosableItemIdMaps(
+      choosableItemIdsRef.current,
+      collectChoosableItemIdsByGroupIndex(
+        newGroups,
+        artikelId,
+        articalNumber
+      )
     );
 
     /* Одразу з відповіді buildConfiguration: новий список груп + узгоджений вибір → перерендер селектів */

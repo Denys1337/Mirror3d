@@ -205,6 +205,7 @@ function HomePageContent() {
   const [stepRestored, setStepRestored] = useState(false);
   const [cartLoading, setCartLoading] = useState(false);
   const [cartError, setCartError] = useState<string | null>(null);
+  const [konfigComment, setKonfigComment] = useState("");
   const [activeOptionIcons, setActiveOptionIcons] = useState<ConfigOptionIcon[]>(
     []
   );
@@ -1136,6 +1137,13 @@ function HomePageContent() {
                 </li>
               ))}
             </ul>
+            <textarea
+              className="config-konfig-comment"
+              rows={4}
+              value={konfigComment}
+              onChange={(e) => setKonfigComment(e.target.value)}
+              placeholder="Hinterlasse uns ein Kommentar zu dieser Konfiguration"
+            />
           </section>
         )}
 
@@ -1178,7 +1186,7 @@ function HomePageContent() {
               setCartError(null);
               setCartLoading(true);
               try {
-                await configStepRef.current?.addToCart();
+                await configStepRef.current?.addToCart(konfigComment);
               } catch (e) {
                 const msg =
                   e instanceof Error ? e.message : "Warenkorb fehlgeschlagen";

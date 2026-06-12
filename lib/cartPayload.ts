@@ -33,7 +33,7 @@ export type CartItemData = ProductLightingFields & {
   breite: string;
   hoehe: string;
   schraege_text: "";
-  konfig_comment: "";
+  konfig_comment: string;
   anzahl: string;
   /** Kosmetik Abstand 1601/1602 — лише якщо поля заповнені */
   eigenschaftwert?: Record<string, string>;
@@ -85,6 +85,7 @@ export function buildCartItemData(input: {
   widthMm: number;
   heightMm: number;
   eigenschaftwert?: Record<string, string>;
+  konfigComment?: string;
 }): CartItemData {
   return {
     jtl_token: input.token,
@@ -105,7 +106,7 @@ export function buildCartItemData(input: {
     breite: String(Math.round(input.widthMm)),
     hoehe: String(Math.round(input.heightMm)),
     schraege_text: "",
-    konfig_comment: "",
+    konfig_comment: input.konfigComment?.trim() ?? "",
     anzahl: String(input.qty),
     ...(input.eigenschaftwert ? { eigenschaftwert: input.eigenschaftwert } : {}),
   };
@@ -124,6 +125,7 @@ export function buildAddToCartRequestBody(input: {
   widthMm: number;
   heightMm: number;
   eigenschaftwert?: Record<string, string>;
+  konfigComment?: string;
 }): AddToCartRequestBody {
   return {
     product: input.artikelId,

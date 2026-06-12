@@ -202,7 +202,7 @@ type Props = {
 };
 
 export type ConfigStepHandle = {
-  addToCart: () => Promise<void>;
+  addToCart: (konfigComment?: string) => Promise<void>;
 };
 
 export type ConfigSummaryLine = {
@@ -1026,7 +1026,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
     };
   }, []);
 
-  const addToCart = useCallback(async () => {
+  const addToCart = useCallback(async (konfigComment?: string) => {
     const token = readUrlJtlToken();
     const sid = readUrlSid();
     if (!configGroups.length) {
@@ -1065,6 +1065,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       widthMm: mirrorDims.widthMm,
       heightMm: mirrorDims.heightMm,
       eigenschaftwert,
+      konfigComment,
     });
 
     const res = await fetch("/api/add-to-cart", {

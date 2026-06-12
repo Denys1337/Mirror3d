@@ -140,11 +140,9 @@ function buildBuildConfigurationIoBody(
     str_hori_top: "0",
     str_hori_btm: "0",
     shining_sid: "no",
+    // Лише розмір: інші kKonfiggruppe залежать від артикулу; невірні id (напр. 288) дають PHP fatal на JTL.
     item: {
       "249": { "0": sizeKonfigItem },
-      "261": { "0": "1215" },
-      "288": { "0": "2584" },
-      "363": { "0": "1838" },
     },
     customSizeConfigItem: sizeKonfigItem,
     customSizeConfigGroup: "249",

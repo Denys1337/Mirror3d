@@ -35,6 +35,8 @@ export type CartItemData = ProductLightingFields & {
   schraege_text: "";
   konfig_comment: string;
   anzahl: string;
+  /** Wishlist position — обов'язкове для data_konf.php */
+  wlPos: "0";
   /** Kosmetik Abstand 1601/1602 — лише якщо поля заповнені */
   eigenschaftwert?: Record<string, string>;
 };
@@ -108,6 +110,7 @@ export function buildCartItemData(input: {
     schraege_text: "",
     konfig_comment: input.konfigComment?.trim() ?? "",
     anzahl: String(input.qty),
+    wlPos: "0",
     ...(input.eigenschaftwert ? { eigenschaftwert: input.eigenschaftwert } : {}),
   };
 }

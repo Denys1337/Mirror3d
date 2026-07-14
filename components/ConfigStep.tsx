@@ -336,8 +336,11 @@ function readMirrorUrlParams() {
   return parseMirrorUrlParams(window.location.search);
 }
 
-function readUrlJtlToken(): string {
-  const token = readMirrorUrlParams().jtlToken?.trim();
+function resolveJtlToken(stateToken?: string | null): string {
+  const token =
+    readMirrorUrlParams().jtlToken?.trim() ||
+    stateToken?.trim() ||
+    DEFAULT_JTL_TOKEN_CLIENT;
   if (!token) {
     throw new Error("t fehlt in der URL (?t=...)");
   }
@@ -761,6 +764,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
   const singleDropdownRootRef = useRef<HTMLDivElement | null>(null);
   const optionInfoInlineRootRef = useRef<HTMLDivElement | null>(null);
   const lastSentSizeKeyRef = useRef<string | null>(null);
+  const sizeSyncInFlightRef = useRef<string | null>(null);
   const choosableItemIdsRef = useRef<Map<number, Set<number>>>(new Map());
   const { artikelId, articalNumber } = resolveProductIdsFromUrl();
 
@@ -1027,7 +1031,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
   }, []);
 
   const addToCart = useCallback(async (konfigComment?: string) => {
-    const token = readUrlJtlToken();
+    const token = resolveJtlToken(jtlToken);
     const sid = readUrlSid();
     if (!configGroups.length) {
       throw new Error("Konfiguration ist noch nicht geladen");
@@ -1086,7 +1090,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       );
     }
     window.location.href = data.url;
-  }, [configGroups, selections, productLightingPayload, kosmetikAbstandDraft]);
+  }, [configGroups, selections, productLightingPayload, kosmetikAbstandDraft, jtlToken]);
 
   useImperativeHandle(ref, () => ({ addToCart }), [addToCart]);
 
@@ -1219,16 +1223,13 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
     setSelections((prev) => {
       if (prev.length > 0) return prev;
       return optionGroups.map((group, index) => {
-        if (group.bAktiv === false) {
-          return { groupIndex: index, selectedItemIds: [] };
-        }
         const activeItems = group.oItem_arr.filter((item) => item.bAktiv);
         const initialIds =
           activeItems.length > 0
             ? activeItems.map((i) => i.kKonfigitem)
             : group.nMin > 0 && group.oItem_arr[0]
-            ? [group.oItem_arr[0].kKonfigitem]
-            : [];
+              ? [group.oItem_arr[0].kKonfigitem]
+              : [];
         return {
           groupIndex: index,
           selectedItemIds:
@@ -1400,12 +1401,14 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       if (s0 != null && existsInGroup(s0)) {
         return { "0": String(s0) };
       }
-      if (group.bAktiv === false) return null;
       let id: number | null = null;
       if (activeFromApi.length > 0) id = activeFromApi[0].kKonfigitem;
       else if (group.nMin > 0 && group.oItem_arr[0])
         id = group.oItem_arr[0].kKonfigitem;
-      if (id == null || id <= 0) return null;
+      if (id == null || id <= 0) {
+        if (group.bAktiv === false) return null;
+        return null;
+      }
       return { "0": String(id) };
     }
 
@@ -1417,9 +1420,11 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       });
       return out;
     }
-    if (group.bAktiv === false) return null;
     const ids = activeFromApi.map((i) => i.kKonfigitem);
-    if (ids.length === 0) return null;
+    if (ids.length === 0) {
+      if (group.bAktiv === false) return null;
+      return null;
+    }
     const out: Record<string, string> = {};
     ids.forEach((kid, j) => {
       out[String(j)] = String(kid);
@@ -1474,6 +1479,43 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
             }
           }
         }
+
+        const prevSel = prev.find((s) => s.groupIndex === index);
+        const prevIds = prevSel?.selectedItemIds ?? [];
+        const activeItems = group.oItem_arr.filter((item) => item.bAktiv);
+
+        if (group.nMax === 1 && prevSel?.userCleared) {
+          return {
+            groupIndex: index,
+            selectedItemIds: [],
+            userCleared: true,
+          };
+        }
+
+        // JTL often keeps group inactive after buildConfiguration while items stay active.
+        if (group.nMax === 1 && prevIds.length === 1) {
+          const pid = prevIds[0];
+          const exists = group.oItem_arr.some((i) => i.kKonfigitem === pid);
+          if (
+            exists &&
+            (activeItems.length === 0 ||
+              activeItems.some((i) => i.kKonfigitem === pid))
+          ) {
+            return { groupIndex: index, selectedItemIds: [pid] };
+          }
+        }
+
+        if (activeItems.length > 0) {
+          const initialIds = activeItems.map((i) => i.kKonfigitem);
+          return {
+            groupIndex: index,
+            selectedItemIds:
+              group.nMax === 1 && initialIds.length > 1
+                ? [initialIds[0]]
+                : initialIds,
+          };
+        }
+
         if (useFallbackForInvalid) {
           const kept = prev.find((s) => s.groupIndex === index)?.selectedItemIds;
           return { groupIndex: index, selectedItemIds: kept?.length ? kept : [] };
@@ -1599,12 +1641,19 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
   const buildConfigurationThenLoadKonfig = async (
     nextSelections: GroupSelection[],
     kosmetikDraftOverride?: Record<KosmetikAbstandKind, string>
-  ) => {
+  ): Promise<boolean> => {
     const groups = configGroups;
-    if (!groups.length || !nextSelections.length) return;
+    if (!groups.length || !nextSelections.length) return false;
 
-    const token = readUrlJtlToken();
-    const lighting = requireProductLighting(productLightingPayload);
+    let token: string;
+    let lighting: ProductLightingPayload;
+    try {
+      token = resolveJtlToken(jtlToken);
+      lighting = requireProductLighting(productLightingPayload);
+    } catch (e) {
+      console.warn("buildConfiguration skipped:", e);
+      return false;
+    }
     const opt = groups.slice(1);
     const { customSizeConfigItem, customSizeConfigGroup, mirrorDims } =
       deriveEffectiveSizeContext(groups);
@@ -1669,7 +1718,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
     if (!buildRes.ok) {
       const txt = await buildRes.text().catch(() => "");
       console.error("buildConfiguration failed:", buildRes.status, txt.slice(0, 200));
-      return;
+      return false;
     }
 
     const buildData = await buildRes.json();
@@ -1683,7 +1732,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
     const newGroups = parseResponseFromVarAssigns(buildData);
     if (!newGroups) {
       console.warn("buildConfiguration: no oKonfig_arr in response");
-      return;
+      return false;
     }
 
     choosableItemIdsRef.current = mergeChoosableItemIdMaps(
@@ -1710,6 +1759,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
     setSelections(prunedAfterBuild);
 
     await executeLoadKonfig(prunedAfterBuild, newGroups);
+    return true;
   };
 
   const scheduleKosmetikAbstandReload = (
@@ -1860,7 +1910,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
 
   // Якщо розмір на Step 1 змінився — одразу перерахувати конфігурацію/ціну на бекенді.
   useEffect(() => {
-    if (!configGroups.length || !selections.length) return;
+    if (!configGroups.length || selections.length === 0 || !productLightingPayload) return;
     if (
       typeof widthMmFromStep1 !== "number" ||
       !Number.isFinite(widthMmFromStep1) ||
@@ -1876,16 +1926,30 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       heightMmFromStep1
     )}`;
     if (lastSentSizeKeyRef.current === sizeKey) return;
+    if (sizeSyncInFlightRef.current === sizeKey) return;
 
-    lastSentSizeKeyRef.current = sizeKey;
+    sizeSyncInFlightRef.current = sizeKey;
+    let cancelled = false;
     void buildConfigurationThenLoadKonfig(
       pruneSelectionsForHiddenRows(optionGroups, selections, gkPruneCtxAllSteps)
-    );
+    ).then((ok) => {
+      if (sizeSyncInFlightRef.current === sizeKey) {
+        sizeSyncInFlightRef.current = null;
+      }
+      if (!cancelled && ok) {
+        lastSentSizeKeyRef.current = sizeKey;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     widthMmFromStep1,
     heightMmFromStep1,
-    selections,
+    selections.length,
     configGroups.length,
+    productLightingPayload,
   ]);
 
   if (configGroups.length === 0) {

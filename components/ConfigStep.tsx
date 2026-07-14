@@ -573,6 +573,74 @@ function mergeChoosableItemIdMaps(
   return out;
 }
 
+function itemGrossPrice(item: RawConfigItem): number {
+  const price = item.fPreis?.[0];
+  return typeof price === "number" && Number.isFinite(price) ? price : 0;
+}
+
+function isRequiredConfigGroup(group: RawConfigGroup): boolean {
+  return group.nMin > 0;
+}
+
+/** Чи слати групу в JTL payload (без зайвих опцій nMin=0). */
+function shouldSendGroupInPayload(
+  group: RawConfigGroup,
+  hasExplicitSelection: boolean
+): boolean {
+  if (hasExplicitSelection) return true;
+  if (group.bAktiv !== false) return true;
+  return isRequiredConfigGroup(group);
+}
+
+/** Дефолт для payload: активні або обов'язкові (nMin>0) групи. */
+function resolveDefaultItemIds(group: RawConfigGroup): number[] {
+  if (group.bAktiv === false && !isRequiredConfigGroup(group)) return [];
+  return pickDefaultItemIdsFromPool(group);
+}
+
+/** Відображення в селектах: активні або обов'язкові групи. */
+function resolveSelectionFromJtlGroup(group: RawConfigGroup): number[] {
+  if (group.bAktiv === false && !isRequiredConfigGroup(group)) return [];
+
+  const activeItems = group.oItem_arr.filter((item) => item.bAktiv);
+  if (group.nMax === 1) {
+    if (activeItems.length === 1) return [activeItems[0].kKonfigitem];
+    return pickDefaultItemIdsFromPool(group);
+  }
+
+  if (activeItems.length > 0) {
+    return activeItems.map((item) => item.kKonfigitem);
+  }
+  return pickDefaultItemIdsFromPool(group);
+}
+
+function pickDefaultItemIdsFromPool(group: RawConfigGroup): number[] {
+  const items = group.oItem_arr;
+  if (!items.length) return [];
+
+  const active = items.filter((item) => item.bAktiv);
+  const pool = active.length > 0 ? active : items;
+
+  if (group.nMax === 1) {
+    const minPrice = Math.min(...pool.map(itemGrossPrice));
+    const cheapest = pool.filter((item) => itemGrossPrice(item) === minPrice);
+    const flagged = cheapest.find((item) => item.fInitial === 1);
+    const pick =
+      flagged ??
+      cheapest.reduce((best, item) =>
+        item.kKonfigitem > best.kKonfigitem ? item : best
+      );
+    return [pick.kKonfigitem];
+  }
+
+  const flagged = pool.filter((item) => item.fInitial === 1);
+  if (flagged.length > 0) return flagged.map((item) => item.kKonfigitem);
+  if (group.nMin > 0 && active.length > 0) {
+    return active.map((item) => item.kKonfigitem);
+  }
+  return [];
+}
+
 function listSelectableItemsForGroup(
   group: RawConfigGroup,
   groupIndex: number,
@@ -1217,27 +1285,30 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
     }
   };
 
-  // Початкова ініціалізація вибору (один раз). Далі — з відповідей buildConfiguration / load_konfig.
+  // Синхронізуємо вибір з JTL: обов'язкові групи (nMin>0) + активні. Не чіпаємо явний вибір користувача.
   useEffect(() => {
     if (optionGroups.length === 0) return;
     setSelections((prev) => {
-      if (prev.length > 0) return prev;
-      return optionGroups.map((group, index) => {
-        const activeItems = group.oItem_arr.filter((item) => item.bAktiv);
-        const initialIds =
-          activeItems.length > 0
-            ? activeItems.map((i) => i.kKonfigitem)
-            : group.nMin > 0 && group.oItem_arr[0]
-              ? [group.oItem_arr[0].kKonfigitem]
-              : [];
+      const next = optionGroups.map((group, index) => {
+        const existing = prev.find((s) => s.groupIndex === index);
+        if (existing?.userCleared) return existing;
+        if (existing?.selectedItemIds.length) return existing;
         return {
           groupIndex: index,
-          selectedItemIds:
-            group.nMax === 1 && initialIds.length > 1
-              ? [initialIds[0]]
-              : initialIds,
+          selectedItemIds: resolveSelectionFromJtlGroup(group),
         };
       });
+      if (
+        prev.length === next.length &&
+        prev.every(
+          (s, i) =>
+            s.userCleared === next[i].userCleared &&
+            s.selectedItemIds.join(",") === next[i].selectedItemIds.join(",")
+        )
+      ) {
+        return prev;
+      }
+      return next;
     });
   }, [optionGroups]);
 
@@ -1393,23 +1464,20 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
     const existsInGroup = (id: number) =>
       id > 0 && group.oItem_arr.some((i) => i.kKonfigitem === id);
 
-    const activeFromApi = group.oItem_arr.filter((i) => i.bAktiv);
-
     if (group.nMax === 1) {
       if (selEntry?.userCleared) return null;
       const s0 = sel[0];
-      if (s0 != null && existsInGroup(s0)) {
+      const hasExplicit = s0 != null && existsInGroup(s0);
+      if (hasExplicit) {
         return { "0": String(s0) };
       }
-      let id: number | null = null;
-      if (activeFromApi.length > 0) id = activeFromApi[0].kKonfigitem;
-      else if (group.nMin > 0 && group.oItem_arr[0])
-        id = group.oItem_arr[0].kKonfigitem;
-      if (id == null || id <= 0) {
-        if (group.bAktiv === false) return null;
-        return null;
+      if (!shouldSendGroupInPayload(group, false)) return null;
+      const defaults = resolveDefaultItemIds(group);
+      if (defaults.length > 0) return { "0": String(defaults[0]) };
+      if (group.nMin > 0 && group.oItem_arr[0]) {
+        return { "0": String(group.oItem_arr[0].kKonfigitem) };
       }
-      return { "0": String(id) };
+      return null;
     }
 
     const picked = sel.filter(existsInGroup);
@@ -1420,11 +1488,9 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       });
       return out;
     }
-    const ids = activeFromApi.map((i) => i.kKonfigitem);
-    if (ids.length === 0) {
-      if (group.bAktiv === false) return null;
-      return null;
-    }
+    if (!shouldSendGroupInPayload(group, false)) return null;
+    const ids = resolveDefaultItemIds(group);
+    if (ids.length === 0) return null;
     const out: Record<string, string> = {};
     ids.forEach((kid, j) => {
       out[String(j)] = String(kid);
@@ -1505,20 +1571,15 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
           }
         }
 
-        if (activeItems.length > 0) {
-          const initialIds = activeItems.map((i) => i.kKonfigitem);
-          return {
-            groupIndex: index,
-            selectedItemIds:
-              group.nMax === 1 && initialIds.length > 1
-                ? [initialIds[0]]
-                : initialIds,
-          };
-        }
-
         if (useFallbackForInvalid) {
           const kept = prev.find((s) => s.groupIndex === index)?.selectedItemIds;
           return { groupIndex: index, selectedItemIds: kept?.length ? kept : [] };
+        }
+        if (isRequiredConfigGroup(group)) {
+          return {
+            groupIndex: index,
+            selectedItemIds: resolveSelectionFromJtlGroup(group),
+          };
         }
         return { groupIndex: index, selectedItemIds: [] };
       }
@@ -1546,18 +1607,9 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
         }
       }
 
-      const initialIds =
-        activeItems.length > 0
-          ? activeItems.map((i) => i.kKonfigitem)
-          : group.nMin > 0 && group.oItem_arr[0]
-            ? [group.oItem_arr[0].kKonfigitem]
-            : [];
       return {
         groupIndex: index,
-        selectedItemIds:
-          group.nMax === 1 && initialIds.length > 1
-            ? [initialIds[0]]
-            : initialIds,
+        selectedItemIds: resolveSelectionFromJtlGroup(group),
       };
     });
 
@@ -1654,107 +1706,158 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       console.warn("buildConfiguration skipped:", e);
       return false;
     }
-    const opt = groups.slice(1);
-    const { customSizeConfigItem, customSizeConfigGroup, mirrorDims } =
-      deriveEffectiveSizeContext(groups);
-    const item = buildConfigurationItemMap(groups, opt, nextSelections);
-    const positionPicked = hasKosmetikPositionInSelections(opt, nextSelections);
-    const abstandFields = buildKosmetikAbstandFields(
-      opt,
-      mirrorDims.widthMm,
-      mirrorDims.heightMm
-    );
-    const eigenschaftwert = buildKosmetikEigenschaftwert({
-      fields: abstandFields,
-      selections: nextSelections,
-      draft: kosmetikDraftOverride ?? kosmetikAbstandDraft,
-      positionPicked,
-    });
 
     const { artikelId, articalNumber } = resolveProductIdsFromUrl();
 
-    const buildParams = {
-      jtl_token: token,
-      inWarenkorb: "1",
-      a: artikelId,
-      wke: "1",
-      show: "1",
-      kKundengruppe: "3",
-      kSprache: "1",
-      ...(eigenschaftwert ? { eigenschaftwert } : {}),
-      artical_number: articalNumber,
-      data_file_exist: "1",
-      mir_type: lighting.mir_type,
-      str_type: lighting.str_type,
-      mir_model: lighting.mir_model,
-      str_widt: lighting.str_widt,
-      str_vert_bside: lighting.str_vert_bside,
-      str_vert_top: lighting.str_vert_top,
-      str_vert_btm: lighting.str_vert_btm,
-      str_hori_bside: lighting.str_hori_bside,
-      str_hori_top: lighting.str_hori_top,
-      str_hori_btm: lighting.str_hori_btm,
-      shining_sid: lighting.shining_sid,
-      item,
-      customSizeConfigItem: String(customSizeConfigItem),
-      customSizeConfigGroup: String(customSizeConfigGroup),
-      breite: String(mirrorDims.widthMm),
-      hoehe: String(mirrorDims.heightMm),
-      schraege_text: "",
-      konfig_comment: "",
-      anzahl: "1",
+    const runBuildConfiguration = async (
+      groupsBase: RawConfigGroup[],
+      selectionsForBuild: GroupSelection[],
+      item: Record<string, Record<string, string>>
+    ) => {
+      const { customSizeConfigItem, customSizeConfigGroup, mirrorDims } =
+        deriveEffectiveSizeContext(groupsBase);
+      const positionPicked = hasKosmetikPositionInSelections(
+        groupsBase.slice(1),
+        selectionsForBuild
+      );
+      const abstandFields = buildKosmetikAbstandFields(
+        groupsBase.slice(1),
+        mirrorDims.widthMm,
+        mirrorDims.heightMm
+      );
+      const eigenschaftwert = buildKosmetikEigenschaftwert({
+        fields: abstandFields,
+        selections: selectionsForBuild,
+        draft: kosmetikDraftOverride ?? kosmetikAbstandDraft,
+        positionPicked,
+      });
+
+      const buildParams = {
+        jtl_token: token,
+        inWarenkorb: "1",
+        a: artikelId,
+        wke: "1",
+        show: "1",
+        kKundengruppe: "3",
+        kSprache: "1",
+        ...(eigenschaftwert ? { eigenschaftwert } : {}),
+        artical_number: articalNumber,
+        data_file_exist: "1",
+        mir_type: lighting.mir_type,
+        str_type: lighting.str_type,
+        mir_model: lighting.mir_model,
+        str_widt: lighting.str_widt,
+        str_vert_bside: lighting.str_vert_bside,
+        str_vert_top: lighting.str_vert_top,
+        str_vert_btm: lighting.str_vert_btm,
+        str_hori_bside: lighting.str_hori_bside,
+        str_hori_top: lighting.str_hori_top,
+        str_hori_btm: lighting.str_hori_btm,
+        shining_sid: lighting.shining_sid,
+        item,
+        customSizeConfigItem: String(customSizeConfigItem),
+        customSizeConfigGroup: String(customSizeConfigGroup),
+        breite: String(mirrorDims.widthMm),
+        hoehe: String(mirrorDims.heightMm),
+        schraege_text: "",
+        konfig_comment: "",
+        anzahl: "1",
+      };
+
+      const buildIoBody = `io=${encodeURIComponent(
+        JSON.stringify({ name: "buildConfiguration", params: [buildParams] })
+      )}`;
+
+      const buildRes = await fetch("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ioBody: buildIoBody }),
+      });
+
+      if (!buildRes.ok) {
+        const txt = await buildRes.text().catch(() => "");
+        console.error(
+          "buildConfiguration failed:",
+          buildRes.status,
+          txt.slice(0, 200)
+        );
+        return null;
+      }
+
+      return buildRes.json();
     };
 
-    const buildIoBody = `io=${encodeURIComponent(
-      JSON.stringify({ name: "buildConfiguration", params: [buildParams] })
-    )}`;
+    let workingGroups = groups;
+    let workingSelections = nextSelections;
+    let lastBuildData: unknown = null;
 
-    const buildRes = await fetch("/api/config", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ioBody: buildIoBody }),
-    });
+    // JTL поступово вмикає групи: кілька раундів buildConfiguration, як на оригінальному сайті.
+    for (let round = 0; round < 8; round++) {
+      const optRound = workingGroups.slice(1);
+      const item = buildConfigurationItemMap(
+        workingGroups,
+        optRound,
+        workingSelections
+      );
+      const itemJson = JSON.stringify(item);
 
-    if (!buildRes.ok) {
-      const txt = await buildRes.text().catch(() => "");
-      console.error("buildConfiguration failed:", buildRes.status, txt.slice(0, 200));
-      return false;
-    }
+      const buildData = await runBuildConfiguration(
+        workingGroups,
+        workingSelections,
+        item
+      );
+      if (!buildData) return false;
 
-    const buildData = await buildRes.json();
-    maybeUpdateJtlTokenFromResponse(buildData, setJtlToken);
-    emitSummIfExists(buildData);
+      lastBuildData = buildData;
+      maybeUpdateJtlTokenFromResponse(buildData, setJtlToken);
+      emitSummIfExists(buildData);
+      applyKonfigValidityWarning(buildData, setConfigApiWarning);
+      const validity = getKonfigValidity(buildData);
+      if (typeof validity === "boolean") {
+        setLastKonfigValid(validity);
+      }
 
-    applyKonfigValidityWarning(buildData, setConfigApiWarning);
-    const validity = getKonfigValidity(buildData);
-    if (typeof validity === "boolean") setLastKonfigValid(validity);
+      const newGroups = parseResponseFromVarAssigns(buildData);
+      if (!newGroups) {
+        console.warn("buildConfiguration: no oKonfig_arr in response");
+        return false;
+      }
 
-    const newGroups = parseResponseFromVarAssigns(buildData);
-    if (!newGroups) {
-      console.warn("buildConfiguration: no oKonfig_arr in response");
-      return false;
-    }
+      choosableItemIdsRef.current = mergeChoosableItemIdMaps(
+        choosableItemIdsRef.current,
+        collectChoosableItemIdsByGroupIndex(newGroups, artikelId, articalNumber)
+      );
 
-    choosableItemIdsRef.current = mergeChoosableItemIdMaps(
-      choosableItemIdsRef.current,
-      collectChoosableItemIdsByGroupIndex(
+      const mergedAfterBuild = mergeSelectionsAfterKonfigResponse(
+        workingSelections,
         newGroups,
-        artikelId,
-        articalNumber
-      )
-    );
+        validity === false
+      );
+      const prunedAfterBuild = pruneSelectionsForHiddenRows(
+        newGroups.slice(1),
+        mergedAfterBuild,
+        gkPruneCtxAllSteps
+      );
+
+      const nextItem = buildConfigurationItemMap(
+        newGroups,
+        newGroups.slice(1),
+        prunedAfterBuild
+      );
+      const nextItemJson = JSON.stringify(nextItem);
+
+      workingGroups = newGroups;
+      workingSelections = prunedAfterBuild;
+
+      if (nextItemJson === itemJson) break;
+    }
+
+    if (!lastBuildData) return false;
+
+    const newGroups = workingGroups;
+    const prunedAfterBuild = workingSelections;
 
     /* Одразу з відповіді buildConfiguration: новий список груп + узгоджений вибір → перерендер селектів */
-    const mergedAfterBuild = mergeSelectionsAfterKonfigResponse(
-      nextSelections,
-      newGroups,
-      validity === false
-    );
-    const prunedAfterBuild = pruneSelectionsForHiddenRows(
-      newGroups.slice(1),
-      mergedAfterBuild,
-      gkPruneCtxAllSteps
-    );
     setConfigGroups([...newGroups]);
     setSelections(prunedAfterBuild);
 

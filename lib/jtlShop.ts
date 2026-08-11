@@ -4,7 +4,18 @@ import {
   type MirrorUrlParams,
 } from "./urlParams";
 
-export const JTL_SHOP_ORIGIN = "https://test.schreiber-design.com";
+const DEFAULT_JTL_SHOP_ORIGIN = "https://test.schreiber-design.com";
+
+function readEnvOrigin(): string | undefined {
+  const raw =
+    process.env.JTL_SHOP_ORIGIN?.trim() ||
+    process.env.NEXT_PUBLIC_JTL_SHOP_ORIGIN?.trim();
+  if (!raw) return undefined;
+  return raw.replace(/^["']|["']$/g, "").trim().replace(/\/$/, "");
+}
+
+/** Єдина base URL магазину JTL (test за замовчуванням). */
+export const JTL_SHOP_ORIGIN = readEnvOrigin() || DEFAULT_JTL_SHOP_ORIGIN;
 
 function isAllowedShopUrl(url: string): boolean {
   try {

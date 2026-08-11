@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
+import { JTL_SHOP_ORIGIN } from "../../../lib/jtlShop";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const JTL_ORIGIN = "https://test.schreiber-design.com";
 
 const BASIC_USER = process.env.JTL_BASIC_USER;
 const BASIC_PASS = process.env.JTL_BASIC_PASS;
@@ -27,12 +26,12 @@ export async function GET(req: Request) {
 
   let target: URL;
   try {
-    target = new URL(raw, `${JTL_ORIGIN}/`);
+    target = new URL(raw, `${JTL_SHOP_ORIGIN}/`);
   } catch {
     return NextResponse.json({ error: "Invalid url" }, { status: 400 });
   }
 
-  if (target.origin !== JTL_ORIGIN) {
+  if (target.origin !== JTL_SHOP_ORIGIN) {
     return NextResponse.json({ error: "Host not allowed" }, { status: 400 });
   }
 
@@ -40,8 +39,8 @@ export async function GET(req: Request) {
   const headers: Record<string, string> = {
     Accept: "image/*,*/*;q=0.8",
     Authorization: AUTH_HEADER,
-    Referer: `${JTL_ORIGIN}/`,
-    Origin: JTL_ORIGIN,
+    Referer: `${JTL_SHOP_ORIGIN}/`,
+    Origin: JTL_SHOP_ORIGIN,
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
   };

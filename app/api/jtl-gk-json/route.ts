@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import type { GkArticleRule, GkGruppeMap } from "../../../lib/gkJson";
+import { JTL_SHOP_ORIGIN } from "../../../lib/jtlShop";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const GK_JSON_URL = "https://test.schreiber-design.com/gk_json.php";
+const GK_JSON_URL = `${JTL_SHOP_ORIGIN}/gk_json.php`;
 
 const BASIC_USER = process.env.JTL_BASIC_USER;
 const BASIC_PASS = process.env.JTL_BASIC_PASS;
@@ -27,8 +28,8 @@ function upstreamHeaders(): Record<string, string> {
     Accept: "application/json,text/plain,*/*",
     Authorization: AUTH_HEADER,
     "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
-    Origin: "https://test.schreiber-design.com",
-    Referer: "https://test.schreiber-design.com/",
+    Origin: JTL_SHOP_ORIGIN,
+    Referer: `${JTL_SHOP_ORIGIN}/`,
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
   };

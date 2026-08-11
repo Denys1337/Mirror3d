@@ -51,6 +51,7 @@ import {
   parseMirrorUrlParams,
   resolveProductIdsFromUrlParams,
 } from "../lib/urlParams";
+import { JTL_SHOP_ORIGIN } from "../lib/jtlShop";
 
 type KonfigErrorEntry = { message?: string; group?: number };
 
@@ -109,6 +110,20 @@ function collectKonfigErrorTexts(
       out.push(v.message);
   }
   return [...new Set(out)];
+}
+
+/** Повідомлення для користувача (без внутрішніх «Fehlerhafter Token»). */
+function collectUserFacingKonfigErrors(
+  msgs: Record<string, KonfigErrorEntry> | undefined
+): string[] {
+  return collectKonfigErrorTexts(msgs).filter(
+    (t) => !/fehlerhafter\s*token|invalid\s*token/i.test(t)
+  );
+}
+
+function userFacingErrorsFromKonfigPayload(data: unknown): string[] {
+  const response = getKonfigResponseValue(data);
+  return collectUserFacingKonfigErrors(response?.errorMessages);
 }
 
 function summarizeKonfigValidityErrors(response: RawResponse): string {
@@ -303,7 +318,9 @@ function optionDisplayPrice(item: RawConfigItem): string | null {
 }
 
 function optionLabel(item: RawConfigItem): string {
-  const base = plainLabelFromApi(item.cName);
+  const base = /bluetooth/i.test(item.cName)
+    ? cleanBluetoothOptionLabel(item.cName)
+    : plainLabelFromApi(item.cName);
   const price = optionDisplayPrice(item);
   if (!price) return base;
   // Nicht doppeln, falls Preis schon im cName steht
@@ -311,7 +328,7 @@ function optionLabel(item: RawConfigItem): string {
   return `${base} ${price}`;
 }
 
-const JTL_IMAGE_BASE = "https://test.schreiber-design.com/";
+const JTL_IMAGE_BASE = `${JTL_SHOP_ORIGIN}/`;
 /** Той самий HTML, що на JTL, але через наш API — інакше X-Frame-Options: sameorigin блокує iframe. */
 function buildOptionInfoFrameSrc(kKonfiggruppe: number): string {
   return `/api/jtl-option-html/${kKonfiggruppe}`;
@@ -464,11 +481,46 @@ function isBluetoothConfigGroup(group: RawConfigGroup): boolean {
   return t.includes("bluetooth");
 }
 
+function isBluetoothStandardOption(item: RawConfigItem): boolean {
+  const t = plainLabelFromApi(item.cName)
+    .toLowerCase()
+    .replace(/ß/g, "ss")
+    .replace(/ö/g, "oe");
+  return t.includes("standard") && t.includes("lautsprecher");
+}
+
+function isBluetoothOhneEinschaltOption(item: RawConfigItem): boolean {
+  const t = plainLabelFromApi(item.cName)
+    .toLowerCase()
+    .replace(/ß/g, "ss");
+  return t.includes("einschalt");
+}
+
+function isBluetoothWhdProfessionalOption(item: RawConfigItem): boolean {
+  const t = plainLabelFromApi(item.cName)
+    .toLowerCase()
+    .replace(/ß/g, "ss")
+    .replace(/ö/g, "oe");
+  return /professional|whd|korperschall/.test(t);
+}
+
+/** Назви з JTL інколи дублюють префікс і містять PIN пари — для UI прибираємо. */
+function cleanBluetoothOptionLabel(raw: string): string {
+  let s = plainLabelFromApi(raw);
+  s = s.replace(/\s*PIN:\s*\d+\s*/gi, " ").replace(/\s+/g, " ").trim();
+  // "Bluetooth Lautsprecher Bluetooth Lautsprecher (ohne…)" → одне повторення
+  s = s.replace(
+    /^(Bluetooth\s+Lautsprecher)\s+\1\b/i,
+    "$1"
+  );
+  return s.trim();
+}
+
 /**
  * Як у PHP-шаблоні магазину:
- * - PIN:XXXX лише для відповідного artical_number;
- * - варіант з kArtikel === основний продукт (напр. 2524 на дзеркалі 49750);
- * - для Bluetooth без PIN на «чужому» продукті — Standard, без WHD Professional.
+ * - PIN:XXXX лише для відповідного artical_number (не для Bluetooth — там PIN = код пари);
+ * - варіант з kArtikel === основний продукт;
+ * - Bluetooth на сайті: «ohne Einschalt-Ton» + WHD Professional (не «Standard»).
  */
 function filterConfigItemsForProduct(
   items: RawConfigItem[],
@@ -480,8 +532,10 @@ function filterConfigItemsForProduct(
 
   const mainArtikelId = Number.parseInt(artikelId, 10);
   const artNr = articalNumber.trim();
+  const bluetoothGroup = isBluetoothConfigGroup(group);
 
   const afterPin = items.filter((item) => {
+    if (bluetoothGroup) return true;
     const name = plainLabelFromApi(item.cName);
     const pinMatch = name.match(/PIN:\s*(\d+)/i);
     if (pinMatch) return pinMatch[1] === artNr;
@@ -496,23 +550,17 @@ function filterConfigItemsForProduct(
     if (mainProductOptions.length > 0) return mainProductOptions;
   }
 
-  if (!isBluetoothConfigGroup(group)) return afterPin;
+  if (!bluetoothGroup) return afterPin;
 
-  const withoutPin = afterPin.filter((item) => {
-    const name = plainLabelFromApi(item.cName);
-    return !/PIN:\s*\d+/i.test(name);
-  });
+  // Як на головному сайті: ohne Einschalt-Ton + WHD, без «Standard» (він зараз битий/не той).
+  const ohne = afterPin.filter(isBluetoothOhneEinschaltOption);
+  const whd = afterPin.filter(isBluetoothWhdProfessionalOption);
+  const preferred = [...ohne, ...whd];
+  if (preferred.length > 0) return preferred;
 
-  const standard = withoutPin.filter((item) => {
-    const t = plainLabelFromApi(item.cName)
-      .toLowerCase()
-      .replace(/ß/g, "ss")
-      .replace(/ö/g, "oe");
-    return !/professional|whd|korperschall/.test(t);
-  });
-
-  if (standard.length > 0) return standard;
-  if (withoutPin.length > 0) return withoutPin;
+  // fallback: усе крім Standard
+  const withoutStandard = afterPin.filter((item) => !isBluetoothStandardOption(item));
+  if (withoutStandard.length > 0) return withoutStandard;
   return afterPin;
 }
 
@@ -819,6 +867,9 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
   const [gkArticleRules, setGkArticleRules] = useState<GkArticleRule[]>([]);
   const [jtlToken, setJtlToken] = useState<string | null>(null);
   const [configApiWarning, setConfigApiWarning] = useState<string | null>(null);
+  const [userFacingKonfigErrors, setUserFacingKonfigErrors] = useState<string[]>(
+    []
+  );
   const [, setLastKonfigValid] = useState<boolean | undefined>(undefined);
   const [singleOpenGroupIdx, setSingleOpenGroupIdx] = useState<number | null>(
     null
@@ -834,7 +885,24 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
   const lastSentSizeKeyRef = useRef<string | null>(null);
   const sizeSyncInFlightRef = useRef<string | null>(null);
   const choosableItemIdsRef = useRef<Map<number, Set<number>>>(new Map());
+  const lastUserFacingKonfigErrorsRef = useRef<string[]>([]);
+  const buildConfigurationThenLoadKonfigRef = useRef<
+    (
+      nextSelections: GroupSelection[],
+      kosmetikDraftOverride?: Record<KosmetikAbstandKind, string>
+    ) => Promise<boolean>
+  >(async () => false);
   const { artikelId, articalNumber } = resolveProductIdsFromUrl();
+
+  const rememberKonfigUserErrors = (
+    data: unknown,
+    opts?: { keepIfEmpty?: boolean }
+  ) => {
+    const errs = userFacingErrorsFromKonfigPayload(data);
+    if (errs.length === 0 && opts?.keepIfEmpty) return;
+    lastUserFacingKonfigErrorsRef.current = errs;
+    setUserFacingKonfigErrors(errs);
+  };
 
   // Витягуємо response.oKonfig_arr через API, щоб не імпортувати великий JSON напряму
   useEffect(() => {
@@ -878,6 +946,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
           if (serverTok) setJtlToken(serverTok);
           else maybeUpdateJtlTokenFromResponse(data, setJtlToken);
           applyKonfigValidityWarning(data, setConfigApiWarning);
+          rememberKonfigUserErrors(data);
         }
       } catch (e) {
         console.error("Failed to load config from /api/config", e);
@@ -1105,6 +1174,19 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       throw new Error("Konfiguration ist noch nicht geladen");
     }
 
+    // Перед кошиком синхронізуємо з JTL — там видно помилки наявності (напр. Bluetooth).
+    const synced = await buildConfigurationThenLoadKonfigRef.current(selections);
+    const blocking = lastUserFacingKonfigErrorsRef.current;
+    if (blocking.length > 0) {
+      setUserFacingKonfigErrors(blocking);
+      throw new Error(blocking.join(" "));
+    }
+    if (!synced) {
+      throw new Error(
+        "Konfiguration konnte nicht geprüft werden. Bitte Seite neu laden."
+      );
+    }
+
     const lighting = requireProductLighting(productLightingPayload);
     const { artikelId, articalNumber } = resolveProductIdsFromUrl();
     const opt = configGroups.slice(1);
@@ -1146,16 +1228,28 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       body: JSON.stringify(body),
     });
 
-    const data = (await res.json()) as AddToCartResponse;
+    const data = (await res.json()) as AddToCartResponse & {
+      bodyPreview?: string;
+      status?: number;
+    };
     if (!res.ok) {
       throw new Error(
         data.error || data.message || `Warenkorb fehlgeschlagen (${res.status})`
       );
     }
     if (!data.success || !data.url) {
-      throw new Error(
-        data.error || data.message || "Warenkorb: unerwartete Antwort vom Server"
-      );
+      // Ще один buildConfiguration — data_konf часто відповідає лише {success:false}.
+      await buildConfigurationThenLoadKonfigRef.current(selections);
+      const fromJtl = lastUserFacingKonfigErrorsRef.current;
+      console.error("addToCart unexpected response", data, fromJtl);
+      const message =
+        fromJtl.length > 0
+          ? fromJtl.join(" ")
+          : data.error ||
+            data.message ||
+            "Der Artikel konnte nicht in den Warenkorb gelegt werden. Bitte prüfen Sie die Verfügbarkeit der gewählten Optionen.";
+      setUserFacingKonfigErrors(fromJtl.length > 0 ? fromJtl : [message]);
+      throw new Error(message);
     }
     window.location.href = data.url;
   }, [configGroups, selections, productLightingPayload, kosmetikAbstandDraft, jtlToken]);
@@ -1671,6 +1765,8 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
     emitSummIfExists(data);
 
     applyKonfigValidityWarning(data, setConfigApiWarning);
+    // load_konfig часто без errorMessages — не затирати помилки з buildConfiguration.
+    rememberKonfigUserErrors(data, { keepIfEmpty: true });
     const validity = getKonfigValidity(data);
     if (typeof validity === "boolean") setLastKonfigValid(validity);
 
@@ -1812,6 +1908,7 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
       maybeUpdateJtlTokenFromResponse(buildData, setJtlToken);
       emitSummIfExists(buildData);
       applyKonfigValidityWarning(buildData, setConfigApiWarning);
+      rememberKonfigUserErrors(buildData);
       const validity = getKonfigValidity(buildData);
       if (typeof validity === "boolean") {
         setLastKonfigValid(validity);
@@ -1864,6 +1961,8 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
     await executeLoadKonfig(prunedAfterBuild, newGroups);
     return true;
   };
+
+  buildConfigurationThenLoadKonfigRef.current = buildConfigurationThenLoadKonfig;
 
   const scheduleKosmetikAbstandReload = (
     pruned: GroupSelection[],
@@ -2070,6 +2169,11 @@ const ConfigStep = forwardRef<ConfigStepHandle, Props>(function ConfigStep(
   return (
     <section className="config-step-2 config-jtl-compact">
       <div className="config-section">
+        {userFacingKonfigErrors.length > 0 && (
+          <div className="jtl-config-api-warning" role="alert">
+            {userFacingKonfigErrors.join(" ")}
+          </div>
+        )}
         {visibleGroupIndices.map((idx) => {
           const group = optionGroups[idx];
           if (!shouldShowConfigGroupRow(group, gkPruneCtx)) return null;

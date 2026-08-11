@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { jtlFetch } from "../../../../lib/jtlFetch";
+import { JTL_SHOP_ORIGIN } from "../../../../lib/jtlShop";
 
 export const runtime = "nodejs";
 
-const JTL_ORIGIN = "https://test.schreiber-design.com";
-const BASE_URL = `${JTL_ORIGIN}/templates/SchreiberSD/product_attributes`;
+const BASE_URL = `${JTL_SHOP_ORIGIN}/templates/SchreiberSD/product_attributes`;
 
 export async function GET(
   _req: Request,
@@ -21,8 +21,8 @@ export async function GET(
     const remoteRes = await jtlFetch(remoteUrl, {
       headers: {
         Accept: "application/json,text/plain,*/*",
-        Referer: `${JTL_ORIGIN}/spiegel/p/badspiegel-comfort-side-ledplus`,
-        Origin: JTL_ORIGIN,
+        Referer: `${JTL_SHOP_ORIGIN}/spiegel/p/badspiegel-comfort-side-ledplus`,
+        Origin: JTL_SHOP_ORIGIN,
       },
     });
 

@@ -1,15 +1,15 @@
 import { NextResponse } from "next/server";
+import { JTL_SHOP_ORIGIN } from "../../../../lib/jtlShop";
 
 export const runtime = "nodejs";
 
 /** HTML з JTL часто віддається лише з Basic + cookie (як /io) — без цього upstream дає 401. */
 export const dynamic = "force-dynamic";
 
-const JTL_ORIGIN = "https://test.schreiber-design.com";
 const JTL_COMBINED_CSS_URL =
-  `${JTL_ORIGIN}/asset/schreiber.css,plugin_css?v=1.0.3`;
+  `${JTL_SHOP_ORIGIN}/asset/schreiber.css,plugin_css?v=1.0.3`;
 const JTL_PRODUCT_PAGE_URL =
-  `${JTL_ORIGIN}/spiegel/p/badspiegel-frame-4s1-led`;
+  `${JTL_SHOP_ORIGIN}/spiegel/p/badspiegel-frame-4s1-led`;
 
 const BASIC_USER = process.env.JTL_BASIC_USER;
 const BASIC_PASS = process.env.JTL_BASIC_PASS;
@@ -58,7 +58,7 @@ function injectExternalCss(html: string, cssBundle: string): string {
 
 function absolutizeCssUrl(href: string): string {
   try {
-    return new URL(href, `${JTL_ORIGIN}/`).toString();
+    return new URL(href, `${JTL_SHOP_ORIGIN}/`).toString();
   } catch {
     return href;
   }
@@ -94,7 +94,7 @@ function rewriteCssUrlsToAbsolute(css: string): string {
       return `url("https:${inner}")`;
     }
     try {
-      const abs = new URL(inner, `${JTL_ORIGIN}/`).toString();
+      const abs = new URL(inner, `${JTL_SHOP_ORIGIN}/`).toString();
       return `url("${abs}")`;
     } catch {
       return full;
@@ -255,7 +255,7 @@ export async function GET(
     return NextResponse.json({ error: "Invalid gruppe" }, { status: 400 });
   }
 
-  const upstreamUrl = `${JTL_ORIGIN}/media/content/options/option_${raw}.html`;
+  const upstreamUrl = `${JTL_SHOP_ORIGIN}/media/content/options/option_${raw}.html`;
 
   const cookie = readEnvTrim("JTL_COOKIE");
 
@@ -263,8 +263,8 @@ export async function GET(
     Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
     Authorization: JTL_AUTHORIZATION,
     "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
-    Origin: JTL_ORIGIN,
-    Referer: `${JTL_ORIGIN}/`,
+    Origin: JTL_SHOP_ORIGIN,
+    Referer: `${JTL_SHOP_ORIGIN}/`,
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
   };
@@ -274,7 +274,7 @@ export async function GET(
     Accept: "text/css,*/*;q=0.1",
     Authorization: JTL_AUTHORIZATION,
     "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
-    Referer: `${JTL_ORIGIN}/`,
+    Referer: `${JTL_SHOP_ORIGIN}/`,
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
   };
@@ -342,9 +342,9 @@ export async function GET(
   const [combinedCssVersioned, combinedCss, schreiberCss, pluginCss] =
     await Promise.all([
       fetchCss(JTL_COMBINED_CSS_URL),
-      fetchCss(`${JTL_ORIGIN}/asset/schreiber.css,plugin_css`),
-    fetchCss(`${JTL_ORIGIN}/asset/schreiber.css`),
-    fetchCss(`${JTL_ORIGIN}/asset/plugin_css`),
+      fetchCss(`${JTL_SHOP_ORIGIN}/asset/schreiber.css,plugin_css`),
+    fetchCss(`${JTL_SHOP_ORIGIN}/asset/schreiber.css`),
+    fetchCss(`${JTL_SHOP_ORIGIN}/asset/plugin_css`),
     ]);
   const productPageHtml = await (async () => {
     try {
@@ -370,7 +370,7 @@ export async function GET(
     .filter((x) => x && x.trim().length > 0)
     .join("\n");
   const cssBundle = rewriteCssUrlsToAbsolute(rawCssBundle);
-  const withBase = asFragment ? html : injectBaseTag(html, JTL_ORIGIN);
+  const withBase = asFragment ? html : injectBaseTag(html, JTL_SHOP_ORIGIN);
   html = injectGridFallback(
     injectIconFallback(
       injectNoHorizontalScroll(

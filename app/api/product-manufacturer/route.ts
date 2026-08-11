@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { jtlFetch } from "../../../lib/jtlFetch";
+import { JTL_SHOP_ORIGIN } from "../../../lib/jtlShop";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const JTL_ORIGIN = "https://test.schreiber-design.com";
 
 function stripHtmlTags(text: string): string {
   return text
@@ -89,13 +88,13 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Invalid id" }, { status: 400 });
   }
 
-  const productUrl = `${JTL_ORIGIN}/navi.php?a=${artikelId}`;
+  const productUrl = `${JTL_SHOP_ORIGIN}/navi.php?a=${artikelId}`;
   try {
     const remoteRes = await jtlFetch(productUrl, {
       headers: {
         Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
-        Referer: `${JTL_ORIGIN}/`,
-        Origin: JTL_ORIGIN,
+        Referer: `${JTL_SHOP_ORIGIN}/`,
+        Origin: JTL_SHOP_ORIGIN,
       },
     });
 

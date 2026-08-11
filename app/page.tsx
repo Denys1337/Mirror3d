@@ -202,7 +202,6 @@ function HomePageContent() {
     null
   );
   const [manufacturerName, setManufacturerName] = useState<string | null>(null);
-  const [stepRestored, setStepRestored] = useState(false);
   const [cartLoading, setCartLoading] = useState(false);
   const [cartError, setCartError] = useState<string | null>(null);
   const [konfigComment, setKonfigComment] = useState("");
@@ -211,22 +210,11 @@ function HomePageContent() {
   );
   const configStepRef = useRef<ConfigStepHandle>(null);
 
-  // Restore step after mount (avoid SSR/client hydration mismatch).
+  // Після reload дані конфігу обнуляються — завжди починаємо з кроку 1.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const raw = window.sessionStorage.getItem("mirror3d-active-step");
-    const parsed = Number(raw);
-    if (parsed >= 1 && parsed <= 5) {
-      setActiveStep(parsed);
-    }
-    setStepRestored(true);
+    window.sessionStorage.removeItem("mirror3d-active-step");
   }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!stepRestored) return;
-    window.sessionStorage.setItem("mirror3d-active-step", String(activeStep));
-  }, [activeStep, stepRestored]);
 
   const sizeLimits = useMemo(
     () => resolveSizeLimits(mirrorSizeFromUrl),

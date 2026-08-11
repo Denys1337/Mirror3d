@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { resolveProductIds } from "../../../lib/productIds";
+import { JTL_SHOP_ORIGIN } from "../../../lib/jtlShop";
 import { parseMirrorUrlParams, resolveSizeKonfigItem } from "../../../lib/urlParams";
 
 export const runtime = "nodejs";
 
-const IO_ENDPOINT = "https://test.schreiber-design.com/io";
+const IO_ENDPOINT = `${JTL_SHOP_ORIGIN}/io`;
 const BASIC_USER = process.env.JTL_BASIC_USER;
 const BASIC_PASS = process.env.JTL_BASIC_PASS;
 const IO_AUTHORIZATION =
@@ -70,8 +71,8 @@ let remoteCookieHeader: string | null = readEnvTrim("JTL_COOKIE") ?? null;
 
 const BROWSER_LIKE_HEADERS: Record<string, string> = {
   "Accept-Language": "en-US,en;q=0.9,uk;q=0.8",
-  Origin: "https://test.schreiber-design.com",
-  Referer: "https://test.schreiber-design.com/spiegel/p/badspiegel-comfort-side-ledplus",
+  Origin: JTL_SHOP_ORIGIN,
+  Referer: `${JTL_SHOP_ORIGIN}/spiegel/p/badspiegel-comfort-side-ledplus`,
   "User-Agent":
     "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36",
   priority: "u=1, i",

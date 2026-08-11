@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import type { AddToCartRequestBody } from "../../../lib/cartPayload";
 import { jtlFetch, mergeSessionCookie, parseJsonFromJtlBody } from "../../../lib/jtlFetch";
+import { JTL_SHOP_ORIGIN } from "../../../lib/jtlShop";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const DATA_KONF_URL = "https://test.schreiber-design.com/data_konf.php";
+const DATA_KONF_URL = `${JTL_SHOP_ORIGIN}/data_konf.php`;
 
 function isValidCartBody(body: unknown): body is AddToCartRequestBody {
   if (!body || typeof body !== "object") return false;
@@ -42,9 +43,9 @@ export async function POST(req: Request) {
   const headers: Record<string, string> = {
     Accept: "application/json, text/plain, */*",
     "Content-Type": "application/json;charset=UTF-8",
-    Origin: "https://test.schreiber-design.com",
+    Origin: JTL_SHOP_ORIGIN,
     Referer:
-      "https://test.schreiber-design.com/spiegel/p/badspiegel-comfort-side-ledplus",
+      `${JTL_SHOP_ORIGIN}/spiegel/p/badspiegel-comfort-side-ledplus`,
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "X-Requested-With": "XMLHttpRequest",
@@ -83,6 +84,14 @@ export async function POST(req: Request) {
         { status: 502 }
       );
     }
+
+    console.log(
+      "[add-to-cart] upstream",
+      remoteRes.status,
+      typeof data === "object" && data
+        ? JSON.stringify(data).slice(0, 800)
+        : String(data).slice(0, 800)
+    );
 
     return NextResponse.json(data);
   } catch (error) {

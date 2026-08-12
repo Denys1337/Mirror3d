@@ -206,8 +206,24 @@ export async function GET(req: Request) {
         res.status,
         res.statusText
       );
+      const outboundTokenSource = urlParams.jtlToken
+        ? "url"
+        : readEnvTrim("JTL_TOKEN")
+          ? "env"
+          : "default";
       return NextResponse.json(
-        { error: "Remote config request failed", status: res.status },
+        {
+          error: "Remote config request failed",
+          status: res.status,
+          debug: {
+            jtlShopOrigin: IO_ENDPOINT,
+            basicAuthProvided: Boolean(BASIC_USER && BASIC_PASS),
+            tokenSource: outboundTokenSource,
+            cookieEnvPresent: Boolean(readEnvTrim("JTL_COOKIE")),
+            cookieOutboundSent: cookieStats.sent,
+            cookieOutboundPairs: cookieStats.pairCount,
+          },
+        },
         { status: 500 }
       );
     }

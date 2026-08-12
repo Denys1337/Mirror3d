@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { resolveProductIds } from "../../../lib/productIds";
 import { JTL_SHOP_ORIGIN } from "../../../lib/jtlShop";
+import { mergeSessionCookie } from "../../../lib/jtlFetch";
 import { parseMirrorUrlParams, resolveSizeKonfigItem } from "../../../lib/urlParams";
 
 export const runtime = "nodejs";
@@ -176,10 +177,15 @@ export async function GET(req: Request) {
     const sizeKonfigItem = resolveSizeKonfigItem(urlParams);
 
     const sidCookie = cookieFromSid(urlParams.sessionId);
+    const envCookie = readEnvTrim("JTL_COOKIE");
+
+    // Важливо для Vercel: якщо в URL переданий `sid`, JTL очікує, що JTLSHOP в Cookie відповідає саме йому.
+    // Тому env-cookie (який може містити інший JTLSHOP) не можна просто підставляти без синхронізації.
     const outboundCookie =
       remoteCookieHeader ||
-      readEnvTrim("JTL_COOKIE") ||
-      sidCookie;
+      (urlParams.sessionId && urlParams.sessionId.trim()
+        ? mergeSessionCookie(urlParams.sessionId)
+        : envCookie || sidCookie);
     const cookieStats = cookieHeaderStats(outboundCookie);
 
     const res = await fetch(IO_ENDPOINT, {
@@ -220,6 +226,7 @@ export async function GET(req: Request) {
             basicAuthProvided: Boolean(BASIC_USER && BASIC_PASS),
             tokenSource: outboundTokenSource,
             cookieEnvPresent: Boolean(readEnvTrim("JTL_COOKIE")),
+            sidProvided: Boolean(urlParams.sessionId && urlParams.sessionId.trim()),
             cookieOutboundSent: cookieStats.sent,
             cookieOutboundPairs: cookieStats.pairCount,
           },

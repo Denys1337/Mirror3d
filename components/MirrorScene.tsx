@@ -2,18 +2,22 @@
 
 import { Canvas, useThree, useFrame, ThreeEvent } from "@react-three/fiber";
 import { OrbitControls, MeshReflectorMaterial, Environment, useTexture, RoundedBox, useGLTF, Text, useEnvironment } from "@react-three/drei";
-import { useRef, useState, useMemo, useEffect, useLayoutEffect } from "react";
+import { useRef, useState, useMemo, useEffect, useLayoutEffect, Suspense } from "react";
 import * as THREE from "three";
 
 /** Відстань камери до orbit target (0, 1.1, 0) у фронтальному та бічних пресетах; раніше 6.75 — дзеркало виглядало дрібним. */
 const DEFAULT_CAMERA_DISTANCE = 3.75;
 
+/** 1K замість 4K (~1.5MB vs ~25MB) — для IBL/відбиттів різниця майже непомітна. */
+const BATHROOM_HDR_URL = "/images/modern_bathroom_1k.hdr";
+
 /**
  * Використовуємо HDR лише як джерело відбиттів (IBL),
  * без фонового зображення навколо стіни.
+ * Обгорнуто в Suspense: сцена + світло з’являються одразу, HDR дотягується фоном.
  */
-function BathroomHdrBackdrop({ hdrRotation = 0 }: { hdrRotation?: number }) {
-  const map = useEnvironment({ files: "/images/modern_bathroom_4k.hdr" });
+function BathroomHdrEnvironment({ hdrRotation = 0 }: { hdrRotation?: number }) {
+  const map = useEnvironment({ files: BATHROOM_HDR_URL });
   const gl = useThree((s) => s.gl);
 
   useLayoutEffect(() => {
@@ -30,6 +34,14 @@ function BathroomHdrBackdrop({ hdrRotation = 0 }: { hdrRotation?: number }) {
       environmentIntensity={1}
       environmentRotation={new THREE.Euler(0, hdrRotation, 0)}
     />
+  );
+}
+
+function BathroomHdrBackdrop({ hdrRotation = 0 }: { hdrRotation?: number }) {
+  return (
+    <Suspense fallback={null}>
+      <BathroomHdrEnvironment hdrRotation={hdrRotation} />
+    </Suspense>
   );
 }
 
